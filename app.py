@@ -7,13 +7,13 @@ from sklearn.preprocessing import MinMaxScaler
 from sklearn.linear_model import LogisticRegression
 
 # ==========================
-# ⚙️ CONFIGURACIÓN
+# ⚙️ CONFIGURACIÓN INICIAL
 # ==========================
 st.set_page_config(page_title="Sudameris Castigada — Score de Recuperación", layout="wide")
 st.title("📊 Sudameris — Modelo de Probabilidad de Pago (Cartera Castigada 2025)")
 
 st.markdown("""
-Esta app unifica las bases de **Asignaciones (enero–septiembre)**, **Promesas**, **Pagos** y **Gestión**,  
+Esta aplicación unifica las bases de **Asignaciones (enero–septiembre)**, **Promesas**, **Pagos** y **Gestión**,  
 para generar un **consolidado completo por cliente** y calcular la **probabilidad de pago o recuperación**.
 """)
 
@@ -21,19 +21,29 @@ para generar un **consolidado completo por cliente** y calcular la **probabilida
 # 🧩 FUNCIONES AUXILIARES
 # ==========================
 def normalizar_columna(c):
+    """Normaliza encabezados (minúsculas, sin tildes, guiones bajos)."""
     c = c.strip().lower()
     c = ''.join(ch for ch in unicodedata.normalize('NFD', c) if unicodedata.category(ch) != 'Mn')
     c = c.replace(" ", "_").replace("-", "_")
     return c
 
 def cargar_y_normalizar(archivo, prefijo):
+    """Carga un Excel y aplica normalización de columnas."""
     df = pd.read_excel(archivo)
     df.columns = [normalizar_columna(c) for c in df.columns]
     df = df.add_prefix(prefijo + "_")
-    for col in df.columns:
-        if "deudor" in col and prefijo + "_deudor" != col:
-            df.rename(columns={col: prefijo + "_deudor"}, inplace=True)
-            break
+    return df
+
+def detectar_columna_deudor(df, nombre_base):
+    """Detecta automáticamente la columna de identificación 'deudor'."""
+    col_deudor = [c for c in df.columns if "deudor" in c.lower()]
+    if col_deudor:
+        df.rename(columns={col_deudor[0]: "deudor"}, inplace=True)
+        st.success(f"✅ [{nombre_base}] Columna detectada: **{col_deudor[0]}** → renombrada como 'deudor'")
+    else:
+        st.error(f"❌ [{nombre_base}] No se encontró una columna con 'deudor'. Verifica los encabezados.")
+        st.stop()
+    df["deudor"] = df["deudor"].astype(str).str.strip()
     return df
 
 # ==========================
@@ -47,37 +57,42 @@ prom_file = st.sidebar.file_uploader("📙 Promesas", type=["xlsx"])
 pagos_file = st.sidebar.file_uploader("📗 Pagos", type=["xlsx"])
 gestion_file = st.sidebar.file_uploader("📕 Gestión", type=["xlsx"])
 
+# ==========================
+# 🚀 PROCESO PRINCIPAL
+# ==========================
 if asig1 and asig2 and prom_file and pagos_file and gestion_file:
     st.success("✅ Todos los archivos cargados correctamente")
 
-    # ==========================
+    # ------------------------------
     # 🔧 CARGAR Y NORMALIZAR BASES
-    # ==========================
+    # ------------------------------
     asig_ene_mar = cargar_y_normalizar(asig1, "asignaciones")
     asig_abr_sep = cargar_y_normalizar(asig2, "asignaciones")
 
-    # Alinear y unir asignaciones
+    # ------------------------------
+    # 🔗 UNIFICAR ASIGNACIONES
+    # ------------------------------
     columnas_comunes = list(set(asig_ene_mar.columns).intersection(set(asig_abr_sep.columns)))
     asignaciones = pd.concat([asig_ene_mar[columnas_comunes], asig_abr_sep[columnas_comunes]], ignore_index=True)
-    asignaciones.drop_duplicates(subset=["asignaciones_deudor"], keep="last", inplace=True)
-    asignaciones.rename(columns={"asignaciones_deudor": "deudor"}, inplace=True)
-    asignaciones["deudor"] = asignaciones["deudor"].astype(str).str.strip()
+    asignaciones = detectar_columna_deudor(asignaciones, "Asignaciones")
+    asignaciones.drop_duplicates(subset=["deudor"], keep="last", inplace=True)
+    asignaciones.reset_index(drop=True, inplace=True)
 
-    # Cargar las demás bases
+    # ------------------------------
+    # 📚 CARGAR OTRAS BASES
+    # ------------------------------
     prom = cargar_y_normalizar(prom_file, "promesas")
+    prom = detectar_columna_deudor(prom, "Promesas")
+
     pagos = cargar_y_normalizar(pagos_file, "pagos")
+    pagos = detectar_columna_deudor(pagos, "Pagos")
+
     gest = cargar_y_normalizar(gestion_file, "gestion")
+    gest = detectar_columna_deudor(gest, "Gestión")
 
-    # Normalizar llaves
-    for df in [prom, pagos, gest]:
-        colnames = [c for c in df.columns if "deudor" in c]
-        if colnames:
-            df.rename(columns={colnames[0]: "deudor"}, inplace=True)
-        df["deudor"] = df["deudor"].astype(str).str.strip()
-
-    # ==========================
-    # 🔗 AGRUPAR Y UNIR TODO
-    # ==========================
+    # ------------------------------
+    # 🔗 AGRUPAR Y UNIR TODAS LAS FUENTES
+    # ------------------------------
     prom_grouped = prom.groupby("deudor").agg("first").reset_index()
     pagos_grouped = pagos.groupby("deudor").agg("first").reset_index()
     gest_grouped = gest.groupby("deudor").agg("first").reset_index()
@@ -90,16 +105,18 @@ if asig1 and asig2 and prom_file and pagos_file and gestion_file:
     st.dataframe(df_final.head(10), use_container_width=True)
 
     # ==========================
-    # 🤖 MODELO DE SCORE
+    # 🧮 MODELO DE SCORE
     # ==========================
     st.markdown("---")
-    st.subheader("🧮 Cálculo de Probabilidad de Pago / Score de Recuperación")
+    st.subheader("🤖 Cálculo de Probabilidad de Pago / Score de Recuperación")
 
     if st.button("Calcular probabilidad de pago para toda la base"):
         with st.spinner("Calculando, por favor espera..."):
             df_modelo = df_final.copy()
 
-            # Variables derivadas
+            # ------------------------------
+            # 🔢 VARIABLES DERIVADAS
+            # ------------------------------
             def safe_days_diff(fecha):
                 try:
                     return (pd.Timestamp.today() - pd.to_datetime(fecha)).days
@@ -114,7 +131,9 @@ if asig1 and asig2 and prom_file and pagos_file and gestion_file:
 
             df_modelo = df_modelo.fillna(0)
 
-            # Variables numéricas
+            # ------------------------------
+            # 📈 VARIABLES DEL MODELO
+            # ------------------------------
             features = [
                 "asignaciones_dias_mora_fin",
                 "asignaciones_capital_act",
@@ -134,7 +153,7 @@ if asig1 and asig2 and prom_file and pagos_file and gestion_file:
             scaler = MinMaxScaler()
             X_scaled = scaler.fit_transform(X)
 
-            # Modelo logístico base (sintético)
+            # Modelo base (sintético)
             y = (X_scaled[:, 0]*-0.3 + X_scaled[:, 2]*0.6 + X_scaled[:, 3]*0.4 + X_scaled[:, 6]*0.5) > 0.5
             y = y.astype(int)
             model = LogisticRegression()
@@ -151,10 +170,16 @@ if asig1 and asig2 and prom_file and pagos_file and gestion_file:
 
             df_modelo["segmento_recuperacion"] = df_modelo["probabilidad_pago"].apply(segmentar)
 
+            # ------------------------------
+            # 📊 RESULTADOS
+            # ------------------------------
             st.success("✅ Score calculado correctamente")
-            st.dataframe(df_modelo[["deudor", "probabilidad_pago", "score_recuperacion", "segmento_recuperacion"]].head(20))
+            st.dataframe(
+                df_modelo[["deudor", "probabilidad_pago", "score_recuperacion", "segmento_recuperacion"]].head(20),
+                use_container_width=True
+            )
 
-            # Descarga Excel
+            # Descarga del Excel final
             excel_buffer = io.BytesIO()
             df_modelo.to_excel(excel_buffer, index=False)
             excel_buffer.seek(0)
