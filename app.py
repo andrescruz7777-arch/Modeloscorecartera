@@ -97,10 +97,10 @@ else:
     # 4️⃣ Corrección de caracteres especiales (encoding)
     # ------------------------------
     def limpiar_texto(texto):
-        if pd.isna(texto):
-            return texto
-        texto = str(texto)
-        # Corrige errores comunes de codificación
+    if pd.isna(texto):
+        return texto
+    try:
+        texto = str(texto).encode("utf-8", "ignore").decode("utf-8", "ignore")
         texto = (
             texto.replace("√ë", "Ñ")
                  .replace("√±", "ñ")
@@ -109,15 +109,11 @@ else:
                  .replace("√³", "ó")
                  .replace("√º", "ú")
         )
-        # Normaliza acentos y elimina caracteres invisibles
-        texto = unicodedata.normalize("NFKC", texto)
+        # Normaliza caracteres Unicode y elimina espacios raros
+        texto = unicodedata.normalize("NFKD", texto)
         return texto.strip()
-
-    # Aplicar limpieza solo a columnas de texto
-    for col in df.select_dtypes(include="object").columns:
-        df[col] = df[col].apply(limpiar_texto)
-
-    st.info("✅ Se corrigieron caracteres mal codificados en texto (eñes, tildes, etc.)")
+    except Exception:
+        return str(texto)
 
     # ------------------------------
     # 5️⃣ Validar tipos de datos básicos
