@@ -236,9 +236,9 @@ except Exception as e:
         )
 
         # Descargar Excel con resultados
-        excel_buffer = io.BytesIO()
-        df_modelo.to_excel(excel_buffer, index=False)
-        excel_buffer.seek(0)
+    excel_buffer = io.BytesIO()
+    df_modelo.to_excel(excel_buffer, index=False)
+    excel_buffer.seek(0)
 
         st.download_button(
             label="⬇️ Descargar base completa con Score de Recuperación",
