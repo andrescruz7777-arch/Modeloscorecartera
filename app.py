@@ -378,3 +378,155 @@ elif file_promesas:
 
 else:
     st.info("⬆️ Carga la base de promesas para realizar el cruce.")
+    # ============================================
+# 📞 PASO 5 — CRUCE CON GESTIONES DE COBRO (VERSIÓN FINAL AJUSTADA)
+# ============================================
+st.title("📞 Paso 5 — Cruce con Gestiones de Cobro (jerarquía de efectividad y columnas reales)")
+
+# Subir archivo de gestiones
+file_gestion = st.file_uploader("📘 Cargar base de gestiones (gestion_sudameris.xlsx)", type=["xlsx"])
+
+if "df_cruce_promesas" not in st.session_state:
+    st.warning("⚠️ Primero completa los pasos anteriores (base jurídica + pagos + promesas).")
+
+elif file_gestion:
+    # Leer base de gestiones
+    df_gest = pd.read_excel(file_gestion)
+
+    st.subheader("🧾 Vista previa de la base de gestiones")
+    st.dataframe(df_gest.head())
+
+    # ------------------------------
+    # 🔧 Estandarizar nombres de columnas
+    # ------------------------------
+    df_gest.columns = (
+        df_gest.columns.str.strip()
+                       .str.lower()
+                       .str.replace(" ", "_")
+                       .str.replace("[^a-z0-9_]", "", regex=True)
+    )
+
+    # Detectar columna de documento
+    col_doc = None
+    for col in df_gest.columns:
+        if "identific" in col.lower() or "document" in col.lower():
+            col_doc = col
+            break
+
+    if col_doc is None:
+        st.error("❌ No se encontró columna de identificación del deudor en la base de gestiones.")
+    else:
+        df_gest = df_gest.rename(columns={col_doc: "documento"})
+
+    # Convertir tipos y limpiar texto
+    df_gest["fecha"] = pd.to_datetime(df_gest.get("fecha"), errors="coerce")
+    df_gest["mejor_gestion"] = df_gest["mejor_gestion"].astype(str).str.upper().str.strip()
+    df_gest["accion"] = df_gest.get("accion", "")
+    df_gest["respuesta"] = df_gest.get("respuesta", "")
+
+    # ------------------------------
+    # 🧩 Mapeo de jerarquía de efectividad (MEJOR GESTION)
+    # ------------------------------
+    jerarquia = {
+        "GESTION EFECTIVA SOLUCIONA MORA": 1,
+        "GESTION EFECTIVA SIN PAGO": 2,
+        "NO EFECTIVA MENSAJE CON TERCERO": 3,
+        "NO EFECTIVA MENSAJE MAQUINA": 4,
+        "NO EFECTIVA CONTACTO CON TERCERO": 5,
+        "NO EFECTIVA": 6,
+        "OPERATIVO": 7,
+        "CLIENTE": 8,
+        "CODEUDOR": 8,
+        "CONTACTO": 8,
+        "CONYUGE": 8,
+        "FAMILIAR": 8,
+        "MAQUINA": 8,
+        "OTRO": 8
+    }
+
+    df_gest["nivel_gestion"] = df_gest["mejor_gestion"].map(jerarquia).fillna(9).astype(int)
+
+    # ------------------------------
+    # 🧮 Agrupar por documento
+    # ------------------------------
+    # Total de gestiones
+    cantidad_gestiones = df_gest.groupby("documento").size().reset_index(name="cantidad_gestiones")
+
+    # Última gestión (por fecha)
+    ultima_gestion = (
+        df_gest.sort_values("fecha")
+        .groupby("documento", as_index=False)
+        .tail(1)[["documento", "fecha", "accion", "respuesta"]]
+        .rename(columns={
+            "fecha": "fecha_ultima_gestion",
+            "accion": "accion_ultima",
+            "respuesta": "respuesta_ultima"
+        })
+    )
+
+    # Mejor gestión (por nivel jerárquico)
+    mejor_gest = (
+        df_gest.sort_values("nivel_gestion", ascending=True)
+        .groupby("documento", as_index=False)
+        .head(1)[["documento", "mejor_gestion", "accion", "respuesta"]]
+        .rename(columns={
+            "accion": "accion_mejor_gestion",
+            "respuesta": "respuesta_mejor_gestion"
+        })
+    )
+
+    # Unir todo
+    resumen_gestiones = (
+        cantidad_gestiones
+        .merge(ultima_gestion, on="documento", how="left")
+        .merge(mejor_gest, on="documento", how="left")
+    )
+
+    resumen_gestiones["tiene_gestion"] = (resumen_gestiones["cantidad_gestiones"] > 0).astype(int)
+
+    # ------------------------------
+    # 🔗 Cruce con base consolidada (jurídica + pagos + promesas)
+    # ------------------------------
+    df_base = st.session_state["df_cruce_promesas"].copy()
+    df_base["deudor"] = df_base["deudor"].astype(str)
+    resumen_gestiones["documento"] = resumen_gestiones["documento"].astype(str)
+
+    df_cruce_gestiones = df_base.merge(
+        resumen_gestiones,
+        how="left",
+        left_on="deudor",
+        right_on="documento"
+    )
+
+    # Rellenar nulos
+    for col in ["tiene_gestion", "cantidad_gestiones"]:
+        df_cruce_gestiones[col] = df_cruce_gestiones[col].fillna(0).astype(int)
+
+    # ------------------------------
+    # 📊 Vista previa final
+    # ------------------------------
+    st.success("✅ Cruce con gestiones realizado correctamente (efectividad jerárquica aplicada).")
+    st.write(f"Total de registros jurídicos: {len(df_base):,}")
+    st.write(f"Deudores con gestión registrada: {df_cruce_gestiones['tiene_gestion'].sum():,}")
+
+    st.subheader("📊 Vista previa del consolidado final (jurídico + pagos + promesas + gestiones)")
+    columnas_prev = [
+        "deudor", "tiene_pago", "cantidad_pagos", "total_pagado",
+        "tiene_promesa", "cantidad_promesas", "valor_ultima_promesa",
+        "estado_ultima_promesa", "recurso",
+        "tiene_gestion", "cantidad_gestiones", "mejor_gestion",
+        "accion_mejor_gestion", "respuesta_mejor_gestion",
+        "fecha_ultima_gestion"
+    ]
+    columnas_prev = [c for c in columnas_prev if c in df_cruce_gestiones.columns]
+    st.dataframe(df_cruce_gestiones[columnas_prev].head(20))
+
+    # ------------------------------
+    # 💾 Guardar consolidado final
+    # ------------------------------
+    st.session_state["df_cruce_gestiones"] = df_cruce_gestiones
+
+else:
+    st.info("⬆️ Carga la base de gestiones para realizar el cruce.")
+
+    
