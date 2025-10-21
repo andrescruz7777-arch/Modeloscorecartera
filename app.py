@@ -98,16 +98,16 @@ else:
     # ------------------------------
     def limpiar_texto(texto):
         if pd.isna(texto):
-    return texto
-        try:
-        texto = str(texto).encode("utf-8", "ignore").decode("utf-8", "ignore")
-        texto = (
-            texto.replace("√ë", "Ñ")
-                 .replace("√±", "ñ")
-                 .replace("√©", "é")
-                 .replace("√¡", "á")
-                 .replace("√³", "ó")
-                 .replace("√º", "ú")
+            return texto
+            try:
+                texto = str(texto).encode("utf-8", "ignore").decode("utf-8", "ignore")
+                texto = (
+                    texto.replace("√ë", "Ñ")
+                    .replace("√±", "ñ")
+                    .replace("√©", "é")
+                    .replace("√¡", "á")
+                    .replace("√³", "ó")
+                    .replace("√º", "ú")
         )
         # Normaliza caracteres Unicode y elimina espacios raros
         texto = unicodedata.normalize("NFKD", texto)
