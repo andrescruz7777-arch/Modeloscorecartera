@@ -130,7 +130,7 @@ if st.session_state["df_unificado"] is not None:
 else:
     st.warning("⚠️ Primero completa el Paso 1 (Carga de datos).")
     # ============================================
-# 💰 PASO 3 — CRUCE JURÍDICO VS PAGOS (VERSIÓN FINAL)
+# 💰 PASO 3 — CRUCE JURÍDICO VS PAGOS (VERSIÓN CORREGIDA)
 # ============================================
 st.title("💰 Paso 3 — Cruce de Base Jurídica con Pagos")
 
@@ -165,26 +165,34 @@ elif file_pagos:
     })
 
     # Convertir tipos
-    df_pagos["valor_pago"] = pd.to_numeric(df_pagos["valor_pago"], errors="coerce")
-    df_pagos["fecha_pago"] = pd.to_datetime(df_pagos["fecha_pago"], errors="coerce")
+    if "valor_pago" in df_pagos.columns:
+        df_pagos["valor_pago"] = pd.to_numeric(df_pagos["valor_pago"], errors="coerce")
+    if "fecha_pago" in df_pagos.columns:
+        df_pagos["fecha_pago"] = pd.to_datetime(df_pagos["fecha_pago"], errors="coerce")
 
     # ------------------------------
-    # 💡 Agrupar pagos por documento
+    # 💡 Agrupar pagos por documento (versión robusta)
     # ------------------------------
-    resumen_pagos = (
-        df_pagos.groupby("documento")
-        .agg({
-            "valor_pago": ["sum", "count"],
-            "fecha_pago": "max"
-        })
-    )
+    if "valor_pago" in df_pagos.columns:
+        resumen_pagos = (
+            df_pagos.groupby("documento", dropna=False)
+            .agg({
+                "valor_pago": ["sum", "count"],
+                "fecha_pago": "max"
+            })
+        )
 
-    # Ajustar nombres de columnas
-    resumen_pagos.columns = ["total_pagado", "cantidad_pagos", "fecha_ultimo_pago"]
-    resumen_pagos = resumen_pagos.reset_index()
+        resumen_pagos.columns = ["total_pagado", "cantidad_pagos", "fecha_ultimo_pago"]
+        resumen_pagos = resumen_pagos.reset_index()
+    else:
+        resumen_pagos = pd.DataFrame(columns=[
+            "documento", "total_pagado", "cantidad_pagos", "fecha_ultimo_pago"
+        ])
 
-    # Indicador de pago
-    resumen_pagos["tiene_pago"] = 1
+    # Asegurar columnas y tipos
+    resumen_pagos["total_pagado"] = pd.to_numeric(resumen_pagos.get("total_pagado", 0), errors="coerce").fillna(0)
+    resumen_pagos["cantidad_pagos"] = resumen_pagos.get("cantidad_pagos", 0).fillna(0).astype(int)
+    resumen_pagos["tiene_pago"] = (resumen_pagos["cantidad_pagos"] > 0).astype(int)
 
     # ------------------------------
     # 🔗 Cruce con la base jurídica
@@ -201,9 +209,12 @@ elif file_pagos:
     )
 
     # Completar nulos
-    df_cruce["tiene_pago"] = df_cruce["tiene_pago"].fillna(0).astype(int)
-    df_cruce["total_pagado"] = df_cruce["total_pagado"].fillna(0)
-    df_cruce["cantidad_pagos"] = df_cruce["cantidad_pagos"].fillna(0).astype(int)
+    for col in ["tiene_pago", "total_pagado", "cantidad_pagos"]:
+        if col in df_cruce.columns:
+            if col == "tiene_pago":
+                df_cruce[col] = df_cruce[col].fillna(0).astype(int)
+            else:
+                df_cruce[col] = df_cruce[col].fillna(0)
 
     # ------------------------------
     # 📊 Resumen y vista previa
@@ -213,10 +224,9 @@ elif file_pagos:
     st.write(f"Deudores con pago registrado: {df_cruce['tiene_pago'].sum():,}")
 
     st.subheader("📊 Vista previa del consolidado jurídico + pagos")
-    st.dataframe(
-        df_cruce[["deudor", "tiene_pago", "cantidad_pagos", "total_pagado", "fecha_ultimo_pago"]]
-        .head(20)
-    )
+    columnas_prev = ["deudor", "tiene_pago", "cantidad_pagos", "total_pagado", "fecha_ultimo_pago"]
+    columnas_prev = [c for c in columnas_prev if c in df_cruce.columns]
+    st.dataframe(df_cruce[columnas_prev].head(20))
 
     # ------------------------------
     # 💾 Guardar consolidado
