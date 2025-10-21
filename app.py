@@ -129,68 +129,99 @@ if st.session_state["df_unificado"] is not None:
     st.success("✅ Base lista y guardada como `df_limpio` para el siguiente paso.")
 else:
     st.warning("⚠️ Primero completa el Paso 1 (Carga de datos).")
-
+    # ============================================
+# 💰 PASO 3 — CRUCE JURÍDICO VS PAGOS (VERSIÓN FINAL)
 # ============================================
-# 📊 PASO 3 — ANÁLISIS EXPLORATORIO DE DATOS
-# ============================================
-st.title("📊 Paso 3 — Análisis Exploratorio de Datos (EDA)")
+st.title("💰 Paso 3 — Cruce de Base Jurídica con Pagos")
 
-# Recuperar o restaurar DataFrame limpio
-if st.session_state["df_limpio"] is None and st.session_state["df_unificado"] is not None:
-    st.session_state["df_limpio"] = st.session_state["df_unificado"].copy()
-    st.info("⚙️ Se restauró automáticamente la base limpia desde df_unificado.")
+# Subir archivo de pagos
+file_pagos = st.file_uploader("📘 Cargar base de pagos (pagos_sudameris.xlsx)", type=["xlsx"])
 
-if st.session_state["df_limpio"] is not None:
-    df = st.session_state["df_limpio"]
+if "df_limpio" not in st.session_state:
+    st.warning("⚠️ Primero completa los pasos anteriores (base jurídica limpia).")
 
-    # 🔍 1️⃣ Resumen General
-    st.subheader("📋 Información General del DataFrame")
-    st.write(f"Filas totales: **{df.shape[0]:,}**")
-    st.write(f"Columnas totales: **{df.shape[1]:,}**")
-    st.dataframe(df.describe(include="all").transpose())
+elif file_pagos:
+    # Leer base de pagos
+    df_pagos = pd.read_excel(file_pagos)
 
-    # ⚠️ 2️⃣ Valores Nulos
-    st.subheader("🚨 Valores Nulos por Columna")
-    nulos = df.isnull().sum().sort_values(ascending=False)
-    st.bar_chart(nulos)
+    st.subheader("🧾 Vista previa de la base de pagos")
+    st.dataframe(df_pagos.head())
 
-    # 📈 3️⃣ Distribución de Variables Numéricas
-    st.subheader("📈 Distribución de Variables Numéricas")
-    columnas_numericas = df.select_dtypes(include=["int64", "float64"]).columns.tolist()
-    if columnas_numericas:
-        columna = st.selectbox("Selecciona una variable numérica para graficar:", columnas_numericas)
-        fig, ax = plt.subplots()
-        ax.hist(df[columna].dropna(), bins=30)
-        ax.set_title(f"Distribución de {columna}")
-        st.pyplot(fig)
-    else:
-        st.info("No se encontraron variables numéricas para graficar.")
-
-    # 🔗 4️⃣ Correlaciones
-    st.subheader("🔗 Correlaciones entre Variables Numéricas")
-    if len(columnas_numericas) >= 2:
-        corr = df[columnas_numericas].corr()
-        st.dataframe(corr)
-        fig, ax = plt.subplots()
-        cax = ax.matshow(corr, cmap="coolwarm")
-        fig.colorbar(cax)
-        ax.set_xticks(range(len(corr.columns)))
-        ax.set_yticks(range(len(corr.columns)))
-        ax.set_xticklabels(corr.columns, rotation=90)
-        ax.set_yticklabels(corr.columns)
-        st.pyplot(fig)
-    else:
-        st.info("No hay suficientes variables numéricas para calcular correlaciones.")
-
-    # 🧠 5️⃣ Recomendación de Variables
-    st.subheader("🧠 Variables candidatas para el modelo")
-    st.dataframe(
-        pd.DataFrame({
-            "Columna": df.columns,
-            "% Nulos": (df.isnull().sum() / len(df) * 100).round(2),
-            "Tipo de Dato": df.dtypes.astype(str)
-        }).sort_values("% Nulos")
+    # ------------------------------
+    # 🔧 Estandarizar columnas
+    # ------------------------------
+    df_pagos.columns = (
+        df_pagos.columns.str.strip()
+                        .str.lower()
+                        .str.replace(" ", "_")
+                        .str.replace("[^a-z0-9_]", "", regex=True)
     )
-else:
-    st.warning("⚠️ Aún no hay base cargada ni limpia. Completa los pasos anteriores.")
 
+    # Renombrar columnas principales
+    df_pagos = df_pagos.rename(columns={
+        "total_de_pago": "valor_pago",
+        "fecha_pago": "fecha_pago",
+        "documento": "documento"
+    })
+
+    # Convertir tipos
+    df_pagos["valor_pago"] = pd.to_numeric(df_pagos["valor_pago"], errors="coerce")
+    df_pagos["fecha_pago"] = pd.to_datetime(df_pagos["fecha_pago"], errors="coerce")
+
+    # ------------------------------
+    # 💡 Agrupar pagos por documento
+    # ------------------------------
+    resumen_pagos = (
+        df_pagos.groupby("documento")
+        .agg({
+            "valor_pago": ["sum", "count"],
+            "fecha_pago": "max"
+        })
+    )
+
+    # Ajustar nombres de columnas
+    resumen_pagos.columns = ["total_pagado", "cantidad_pagos", "fecha_ultimo_pago"]
+    resumen_pagos = resumen_pagos.reset_index()
+
+    # Indicador de pago
+    resumen_pagos["tiene_pago"] = 1
+
+    # ------------------------------
+    # 🔗 Cruce con la base jurídica
+    # ------------------------------
+    df_jur = st.session_state["df_limpio"].copy()
+    df_jur["deudor"] = df_jur["deudor"].astype(str)
+    resumen_pagos["documento"] = resumen_pagos["documento"].astype(str)
+
+    df_cruce = df_jur.merge(
+        resumen_pagos,
+        how="left",
+        left_on="deudor",
+        right_on="documento"
+    )
+
+    # Completar nulos
+    df_cruce["tiene_pago"] = df_cruce["tiene_pago"].fillna(0).astype(int)
+    df_cruce["total_pagado"] = df_cruce["total_pagado"].fillna(0)
+    df_cruce["cantidad_pagos"] = df_cruce["cantidad_pagos"].fillna(0).astype(int)
+
+    # ------------------------------
+    # 📊 Resumen y vista previa
+    # ------------------------------
+    st.success("✅ Cruce realizado correctamente.")
+    st.write(f"Total de registros jurídicos: {len(df_jur):,}")
+    st.write(f"Deudores con pago registrado: {df_cruce['tiene_pago'].sum():,}")
+
+    st.subheader("📊 Vista previa del consolidado jurídico + pagos")
+    st.dataframe(
+        df_cruce[["deudor", "tiene_pago", "cantidad_pagos", "total_pagado", "fecha_ultimo_pago"]]
+        .head(20)
+    )
+
+    # ------------------------------
+    # 💾 Guardar consolidado
+    # ------------------------------
+    st.session_state["df_cruce_pagos"] = df_cruce
+
+else:
+    st.info("⬆️ Carga la base de pagos para realizar el cruce.")
