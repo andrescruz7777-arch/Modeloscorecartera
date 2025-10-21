@@ -7,13 +7,13 @@ from sklearn.preprocessing import MinMaxScaler
 from sklearn.linear_model import LogisticRegression
 
 # ==========================
-# ⚙️ CONFIGURACIÓN INICIAL
+# ⚙️ CONFIGURACIÓN
 # ==========================
 st.set_page_config(page_title="Sudameris Castigada — Score de Recuperación", layout="wide")
 st.title("📊 Sudameris — Modelo de Probabilidad de Pago (Cartera Castigada 2025)")
 
 st.markdown("""
-Esta aplicación unifica las bases de **Asignaciones (enero–septiembre)**, **Promesas**, **Pagos** y **Gestión**,  
+Esta app unifica las bases de **Asignaciones (enero–septiembre)**, **Promesas**, **Pagos** y **Gestión**,  
 para generar un **consolidado completo por cliente** y calcular la **probabilidad de pago o recuperación**.
 """)
 
@@ -21,29 +21,19 @@ para generar un **consolidado completo por cliente** y calcular la **probabilida
 # 🧩 FUNCIONES AUXILIARES
 # ==========================
 def normalizar_columna(c):
-    """Normaliza encabezados (minúsculas, sin tildes, guiones bajos)."""
     c = c.strip().lower()
     c = ''.join(ch for ch in unicodedata.normalize('NFD', c) if unicodedata.category(ch) != 'Mn')
     c = c.replace(" ", "_").replace("-", "_")
     return c
 
 def cargar_y_normalizar(archivo, prefijo):
-    """Carga un Excel y aplica normalización de columnas."""
     df = pd.read_excel(archivo)
     df.columns = [normalizar_columna(c) for c in df.columns]
     df = df.add_prefix(prefijo + "_")
-    return df
-
-def detectar_columna_deudor(df, nombre_base):
-    """Detecta automáticamente la columna de identificación 'deudor'."""
-    col_deudor = [c for c in df.columns if "deudor" in c.lower()]
-    if col_deudor:
-        df.rename(columns={col_deudor[0]: "deudor"}, inplace=True)
-        st.success(f"✅ [{nombre_base}] Columna detectada: **{col_deudor[0]}** → renombrada como 'deudor'")
-    else:
-        st.error(f"❌ [{nombre_base}] No se encontró una columna con 'deudor'. Verifica los encabezados.")
-        st.stop()
-    df["deudor"] = df["deudor"].astype(str).str.strip()
+    for col in df.columns:
+        if "deudor" in col and prefijo + "_deudor" != col:
+            df.rename(columns={col: prefijo + "_deudor"}, inplace=True)
+            break
     return df
 
 # ==========================
@@ -57,42 +47,46 @@ prom_file = st.sidebar.file_uploader("📙 Promesas", type=["xlsx"])
 pagos_file = st.sidebar.file_uploader("📗 Pagos", type=["xlsx"])
 gestion_file = st.sidebar.file_uploader("📕 Gestión", type=["xlsx"])
 
-# ==========================
-# 🚀 PROCESO PRINCIPAL
-# ==========================
 if asig1 and asig2 and prom_file and pagos_file and gestion_file:
     st.success("✅ Todos los archivos cargados correctamente")
 
-    # ------------------------------
+    # ==========================
     # 🔧 CARGAR Y NORMALIZAR BASES
-    # ------------------------------
+    # ==========================
     asig_ene_mar = cargar_y_normalizar(asig1, "asignaciones")
     asig_abr_sep = cargar_y_normalizar(asig2, "asignaciones")
 
-    # ------------------------------
-    # 🔗 UNIFICAR ASIGNACIONES
-    # ------------------------------
+    # Alinear y unir asignaciones
     columnas_comunes = list(set(asig_ene_mar.columns).intersection(set(asig_abr_sep.columns)))
     asignaciones = pd.concat([asig_ene_mar[columnas_comunes], asig_abr_sep[columnas_comunes]], ignore_index=True)
-    asignaciones = detectar_columna_deudor(asignaciones, "Asignaciones")
-    asignaciones.drop_duplicates(subset=["deudor"], keep="last", inplace=True)
-    asignaciones.reset_index(drop=True, inplace=True)
+    asignaciones.drop_duplicates(subset=["asignaciones_deudor"], keep="last", inplace=True)
+    asignaciones.rename(columns={"asignaciones_deudor": "deudor"}, inplace=True)
+    asignaciones["deudor"] = asignaciones["deudor"].astype(str).str.strip()
 
-    # ------------------------------
-    # 📚 CARGAR OTRAS BASES
-    # ------------------------------
+    # Cargar las demás bases
     prom = cargar_y_normalizar(prom_file, "promesas")
-    prom = detectar_columna_deudor(prom, "Promesas")
-
     pagos = cargar_y_normalizar(pagos_file, "pagos")
-    pagos = detectar_columna_deudor(pagos, "Pagos")
-
     gest = cargar_y_normalizar(gestion_file, "gestion")
-    gest = detectar_columna_deudor(gest, "Gestión")
 
-    # ------------------------------
-    # 🔗 AGRUPAR Y UNIR TODAS LAS FUENTES
-    # ------------------------------
+    # ==============================
+    # 🧹 NORMALIZACIÓN AVANZADA DEL CAMPO DEUDOR
+    # ==============================
+    for df in [asignaciones, prom, pagos, gest]:
+        colnames = [c for c in df.columns if "deudor" in c]
+        if colnames:
+            df.rename(columns={colnames[0]: "deudor"}, inplace=True)
+
+        df["deudor"] = (
+            df["deudor"]
+            .astype(str)
+            .str.replace(r"[^0-9]", "", regex=True)
+            .str.strip()
+            .str.lstrip("0")
+        )
+
+    # ==========================
+    # 🔗 AGRUPAR Y UNIR TODO
+    # ==========================
     prom_grouped = prom.groupby("deudor").agg("first").reset_index()
     pagos_grouped = pagos.groupby("deudor").agg("first").reset_index()
     gest_grouped = gest.groupby("deudor").agg("first").reset_index()
@@ -105,18 +99,16 @@ if asig1 and asig2 and prom_file and pagos_file and gestion_file:
     st.dataframe(df_final.head(10), use_container_width=True)
 
     # ==========================
-    # 🧮 MODELO DE SCORE
+    # 🤖 MODELO DE SCORE
     # ==========================
     st.markdown("---")
-    st.subheader("🤖 Cálculo de Probabilidad de Pago / Score de Recuperación")
+    st.subheader("🧮 Cálculo de Probabilidad de Pago / Score de Recuperación")
 
     if st.button("Calcular probabilidad de pago para toda la base"):
         with st.spinner("Calculando, por favor espera..."):
             df_modelo = df_final.copy()
 
-            # ------------------------------
-            # 🔢 VARIABLES DERIVADAS
-            # ------------------------------
+            # Variables derivadas
             def safe_days_diff(fecha):
                 try:
                     return (pd.Timestamp.today() - pd.to_datetime(fecha)).days
@@ -131,9 +123,7 @@ if asig1 and asig2 and prom_file and pagos_file and gestion_file:
 
             df_modelo = df_modelo.fillna(0)
 
-            # ------------------------------
-            # 📈 VARIABLES DEL MODELO
-            # ------------------------------
+            # Variables numéricas
             features = [
                 "asignaciones_dias_mora_fin",
                 "asignaciones_capital_act",
@@ -153,7 +143,7 @@ if asig1 and asig2 and prom_file and pagos_file and gestion_file:
             scaler = MinMaxScaler()
             X_scaled = scaler.fit_transform(X)
 
-            # Modelo base (sintético)
+            # Modelo logístico base (sintético)
             y = (X_scaled[:, 0]*-0.3 + X_scaled[:, 2]*0.6 + X_scaled[:, 3]*0.4 + X_scaled[:, 6]*0.5) > 0.5
             y = y.astype(int)
             model = LogisticRegression()
@@ -170,16 +160,10 @@ if asig1 and asig2 and prom_file and pagos_file and gestion_file:
 
             df_modelo["segmento_recuperacion"] = df_modelo["probabilidad_pago"].apply(segmentar)
 
-            # ------------------------------
-            # 📊 RESULTADOS
-            # ------------------------------
             st.success("✅ Score calculado correctamente")
-            st.dataframe(
-                df_modelo[["deudor", "probabilidad_pago", "score_recuperacion", "segmento_recuperacion"]].head(20),
-                use_container_width=True
-            )
+            st.dataframe(df_modelo[["deudor", "probabilidad_pago", "score_recuperacion", "segmento_recuperacion"]].head(20))
 
-            # Descarga del Excel final
+            # Descarga Excel
             excel_buffer = io.BytesIO()
             df_modelo.to_excel(excel_buffer, index=False)
             excel_buffer.seek(0)
@@ -190,78 +174,71 @@ if asig1 and asig2 and prom_file and pagos_file and gestion_file:
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
 
+    # ==============================
+    # 🩺 DIAGNÓSTICO DE CRUCES
+    # ==============================
+    st.markdown("---")
+    st.subheader("🩺 Diagnóstico de cruces — Validación de Pagos, Promesas y Gestión")
+
+    diagnostico_file = st.file_uploader("📂 Cargar archivo para diagnóstico (ej. sudameris_score_recuperacion.xlsx)", type=["xlsx"])
+
+    if diagnostico_file or ('df_modelo' in locals() or 'df_final' in locals()):
+        if st.button("🔍 Analizar calidad de cruces"):
+            try:
+                if diagnostico_file:
+                    df = pd.read_excel(diagnostico_file)
+                elif 'df_modelo' in locals():
+                    df = df_modelo.copy()
+                elif 'df_final' in locals():
+                    df = df_final.copy()
+
+                total_clientes = len(df)
+                pagos_cols = [c for c in df.columns if c.startswith("pagos_")]
+                prom_cols = [c for c in df.columns if c.startswith("promesas_")]
+                gest_cols = [c for c in df.columns if c.startswith("gestion_")]
+
+                # Pagos
+                col_pago = next((c for c in pagos_cols if "total" in c or "valor" in c), None)
+                pagos_validos = df[col_pago].fillna(0) if col_pago else pd.Series([0]*total_clientes)
+                clientes_con_pagos = (pagos_validos > 0).sum()
+                porc_pagos = (clientes_con_pagos / total_clientes) * 100
+
+                # Promesas
+                col_prom = next((c for c in prom_cols if "acuerdo" in c or "valor" in c), None)
+                prom_validas = df[col_prom].fillna(0) if col_prom else pd.Series([0]*total_clientes)
+                clientes_con_promesas = (prom_validas > 0).sum()
+                porc_promesas = (clientes_con_promesas / total_clientes) * 100
+
+                # Gestiones
+                col_gest = next((c for c in gest_cols if "fecha" in c), None)
+                gest_validas = df[col_gest].notna().sum() if col_gest else 0
+                porc_gestiones = (gest_validas / total_clientes) * 100
+
+                # Identificadores
+                if "deudor" in df.columns:
+                    df["deudor_limpio"] = df["deudor"].astype(str).str.replace(r"[^0-9]", "", regex=True)
+                    df["long_id"] = df["deudor_limpio"].str.len()
+                    longitudes = df["long_id"].value_counts().head(5)
+                else:
+                    longitudes = pd.Series({"Sin columna deudor": total_clientes})
+
+                # Resultados
+                st.markdown("### 📊 Resultados del diagnóstico")
+                st.write(f"- Total clientes analizados: **{total_clientes:,}**")
+                st.write(f"- Clientes con pagos válidos: **{clientes_con_pagos:,}** → ({porc_pagos:.2f}%)")
+                st.write(f"- Clientes con promesas válidas: **{clientes_con_promesas:,}** → ({porc_promesas:.2f}%)")
+                st.write(f"- Clientes con gestiones registradas: **{gest_validas:,}** → ({porc_gestiones:.2f}%)")
+
+                st.markdown("### 🔎 Longitud de identificadores más común")
+                st.dataframe(longitudes)
+
+                if porc_pagos < 5 or porc_promesas < 5:
+                    st.warning("⚠️ Los cruces con pagos o promesas son muy bajos. Es probable que el campo `deudor` tenga diferencias de formato (espacios, puntos o ceros a la izquierda).")
+                    st.info("✅ Solución: normaliza el campo `deudor` en todas las bases antes de unirlas usando:\n`df['deudor'] = df['deudor'].astype(str).str.replace(r'[^0-9]', '').str.strip()`")
+                else:
+                    st.success("✅ Los cruces son coherentes; la baja cobertura puede ser genuina por falta de gestión o promesas.")
+
+            except Exception as e:
+                st.error(f"❌ Error al analizar el archivo: {e}")
 else:
     st.info("Carga los 5 archivos (Asignaciones enero–marzo, abril–septiembre, Promesas, Pagos y Gestión) para iniciar.")
-    import pandas as pd
-
-# ==============================
-# 🩺 DIAGNÓSTICO DE CRUCES (versión mejorada)
-# ==============================
-st.markdown("---")
-st.subheader("🩺 Diagnóstico de cruces — Validación de Pagos, Promesas y Gestión")
-
-# Permitir cargar manualmente un Excel para diagnóstico
-diagnostico_file = st.file_uploader("📂 Cargar archivo para diagnóstico (ej. sudameris_score_recuperacion.xlsx)", type=["xlsx"])
-
-if diagnostico_file or ('df_modelo' in locals() or 'df_final' in locals()):
-    if st.button("🔍 Analizar calidad de cruces"):
-        try:
-            # Prioridad: archivo cargado → df_modelo → df_final
-            if diagnostico_file:
-                df = pd.read_excel(diagnostico_file)
-            elif 'df_modelo' in locals():
-                df = df_modelo.copy()
-            elif 'df_final' in locals():
-                df = df_final.copy()
-
-            total_clientes = len(df)
-            pagos_cols = [c for c in df.columns if c.startswith("pagos_")]
-            prom_cols = [c for c in df.columns if c.startswith("promesas_")]
-            gest_cols = [c for c in df.columns if c.startswith("gestion_")]
-
-            # --- Pagos ---
-            col_pago = next((c for c in pagos_cols if "total" in c or "valor" in c), None)
-            pagos_validos = df[col_pago].fillna(0) if col_pago else pd.Series([0]*total_clientes)
-            clientes_con_pagos = (pagos_validos > 0).sum()
-            porc_pagos = (clientes_con_pagos / total_clientes) * 100
-
-            # --- Promesas ---
-            col_prom = next((c for c in prom_cols if "acuerdo" in c or "valor" in c), None)
-            prom_validas = df[col_prom].fillna(0) if col_prom else pd.Series([0]*total_clientes)
-            clientes_con_promesas = (prom_validas > 0).sum()
-            porc_promesas = (clientes_con_promesas / total_clientes) * 100
-
-            # --- Gestiones ---
-            col_gest = next((c for c in gest_cols if "fecha" in c), None)
-            gest_validas = df[col_gest].notna().sum() if col_gest else 0
-            porc_gestiones = (gest_validas / total_clientes) * 100
-
-            # --- Identificadores ---
-            if "deudor" in df.columns:
-                df["deudor_limpio"] = df["deudor"].astype(str).str.replace(r"[^0-9]", "", regex=True)
-                df["long_id"] = df["deudor_limpio"].str.len()
-                longitudes = df["long_id"].value_counts().head(5)
-            else:
-                longitudes = pd.Series({"Sin columna deudor": total_clientes})
-
-            # --- Resultados ---
-            st.markdown("### 📊 Resultados del diagnóstico")
-            st.write(f"- Total clientes analizados: **{total_clientes:,}**")
-            st.write(f"- Clientes con pagos válidos: **{clientes_con_pagos:,}** → ({porc_pagos:.2f}%)")
-            st.write(f"- Clientes con promesas válidas: **{clientes_con_promesas:,}** → ({porc_promesas:.2f}%)")
-            st.write(f"- Clientes con gestiones registradas: **{gest_validas:,}** → ({porc_gestiones:.2f}%)")
-
-            st.markdown("### 🔎 Longitud de identificadores más común")
-            st.dataframe(longitudes)
-
-            # Interpretación
-            if porc_pagos < 5 or porc_promesas < 5:
-                st.warning("⚠️ Los cruces con pagos o promesas son muy bajos. Es probable que el campo `deudor` tenga diferencias de formato (espacios, puntos o ceros a la izquierda).")
-                st.info("✅ Solución: normaliza el campo `deudor` en todas las bases antes de unirlas usando:\n`df['deudor'] = df['deudor'].astype(str).str.replace(r'[^0-9]', '').str.strip()`")
-            else:
-                st.success("✅ Los cruces son coherentes; la baja cobertura puede ser genuina por falta de gestión o promesas.")
-
-        except Exception as e:
-            st.error(f"❌ Error al analizar el archivo: {e}")
-else:
-    st.info("Carga un archivo Excel o ejecuta el modelo antes de usar el diagnóstico.")
