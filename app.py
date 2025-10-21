@@ -49,54 +49,74 @@ gestion_file = st.sidebar.file_uploader("📕 Gestión", type=["xlsx"])
 
 if asig1 and asig2 and prom_file and pagos_file and gestion_file:
     st.success("✅ Todos los archivos cargados correctamente")
-
     # ==========================
-    # 🔧 CARGAR Y NORMALIZAR BASES
-    # ==========================
-    asig_ene_mar = cargar_y_normalizar(asig1, "asignaciones")
-    asig_abr_sep = cargar_y_normalizar(asig2, "asignaciones")
+# 🔧 CARGAR Y NORMALIZAR BASES
+# ==========================
+asig_ene_mar = cargar_y_normalizar(asig1, "asignaciones")
+asig_abr_sep = cargar_y_normalizar(asig2, "asignaciones")
 
-    # Alinear y unir asignaciones
-    columnas_comunes = list(set(asig_ene_mar.columns).intersection(set(asig_abr_sep.columns)))
-    asignaciones = pd.concat([asig_ene_mar[columnas_comunes], asig_abr_sep[columnas_comunes]], ignore_index=True)
-    asignaciones.drop_duplicates(subset=["asignaciones_deudor"], keep="last", inplace=True)
-    asignaciones.rename(columns={"asignaciones_deudor": "deudor"}, inplace=True)
-    asignaciones["deudor"] = asignaciones["deudor"].astype(str).str.strip()
+# ==============================
+# 🔗 UNIFICAR BASES DE ASIGNACIONES (enero–marzo + abril–septiembre)
+# ==============================
+columnas_comunes = list(set(asig_ene_mar.columns).intersection(set(asig_abr_sep.columns)))
+asignaciones = pd.concat([asig_ene_mar[columnas_comunes], asig_abr_sep[columnas_comunes]], ignore_index=True)
 
-    # Cargar las demás bases
-    prom = cargar_y_normalizar(prom_file, "promesas")
-    pagos = cargar_y_normalizar(pagos_file, "pagos")
-    gest = cargar_y_normalizar(gestion_file, "gestion")
+# 🔍 Detectar la columna que contiene el número de documento o deudor
+col_deudor_asig = next((c for c in asignaciones.columns if "deudor" in c.lower()), None)
+if col_deudor_asig:
+    asignaciones.rename(columns={col_deudor_asig: "deudor"}, inplace=True)
+else:
+    st.error("⚠️ No se encontró ninguna columna con la palabra 'deudor' en las bases de asignaciones.")
+    st.stop()
 
-    # ==============================
-    # 🧹 NORMALIZACIÓN AVANZADA DEL CAMPO DEUDOR
-    # ==============================
-    for df in [asignaciones, prom, pagos, gest]:
-        colnames = [c for c in df.columns if "deudor" in c]
-        if colnames:
-            df.rename(columns={colnames[0]: "deudor"}, inplace=True)
+# 🧹 Normalización avanzada del identificador deudor
+asignaciones["deudor"] = (
+    asignaciones["deudor"]
+    .astype(str)
+    .str.replace(r"[^0-9]", "", regex=True)  # elimina todo lo que no sea número
+    .str.strip()                              # elimina espacios
+    .str.lstrip("0")                          # quita ceros iniciales
+)
+asignaciones.drop_duplicates(subset=["deudor"], keep="last", inplace=True)
 
-        df["deudor"] = (
-            df["deudor"]
-            .astype(str)
-            .str.replace(r"[^0-9]", "", regex=True)
-            .str.strip()
-            .str.lstrip("0")
-        )
+# ==============================
+# 📂 CARGAR LAS DEMÁS BASES
+# ==============================
+prom = cargar_y_normalizar(prom_file, "promesas")
+pagos = cargar_y_normalizar(pagos_file, "pagos")
+gest = cargar_y_normalizar(gestion_file, "gestion")
 
-    # ==========================
-    # 🔗 AGRUPAR Y UNIR TODO
-    # ==========================
-    prom_grouped = prom.groupby("deudor").agg("first").reset_index()
-    pagos_grouped = pagos.groupby("deudor").agg("first").reset_index()
-    gest_grouped = gest.groupby("deudor").agg("first").reset_index()
+# ==============================
+# 🧹 NORMALIZACIÓN AVANZADA DEL CAMPO DEUDOR EN TODAS LAS BASES
+# ==============================
+for df in [prom, pagos, gest]:
+    colnames = [c for c in df.columns if "deudor" in c.lower()]
+    if colnames:
+        df.rename(columns={colnames[0]: "deudor"}, inplace=True)
+    else:
+        st.warning(f"⚠️ No se encontró campo deudor en una de las bases ({df.shape[1]} columnas).")
 
-    df_final = asignaciones.merge(prom_grouped, on="deudor", how="left")
-    df_final = df_final.merge(pagos_grouped, on="deudor", how="left")
-    df_final = df_final.merge(gest_grouped, on="deudor", how="left")
+    df["deudor"] = (
+        df["deudor"]
+        .astype(str)
+        .str.replace(r"[^0-9]", "", regex=True)
+        .str.strip()
+        .str.lstrip("0")
+    )
 
-    st.subheader("📋 Vista previa del consolidado (primeros 10 clientes)")
-    st.dataframe(df_final.head(10), use_container_width=True)
+# ==========================
+# 🔗 AGRUPAR Y UNIR TODO
+# ==========================
+prom_grouped = prom.groupby("deudor").agg("first").reset_index()
+pagos_grouped = pagos.groupby("deudor").agg("first").reset_index()
+gest_grouped = gest.groupby("deudor").agg("first").reset_index()
+
+df_final = asignaciones.merge(prom_grouped, on="deudor", how="left")
+df_final = df_final.merge(pagos_grouped, on="deudor", how="left")
+df_final = df_final.merge(gest_grouped, on="deudor", how="left")
+
+st.subheader("📋 Vista previa del consolidado (primeros 10 clientes)")
+st.dataframe(df_final.head(10), use_container_width=True)
 
     # ==========================
     # 🤖 MODELO DE SCORE
