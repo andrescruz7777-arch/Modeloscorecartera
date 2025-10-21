@@ -97,23 +97,24 @@ else:
     # 4️⃣ Corrección de caracteres especiales (encoding)
     # ------------------------------
     def limpiar_texto(texto):
-        if pd.isna(texto):
-            return texto
-try:
-            texto = str(texto).encode("utf-8", "ignore").decode("utf-8", "ignore")
-            texto = (
-                    texto.replace("√ë", "Ñ")
-                    .replace("√±", "ñ")
-                    .replace("√©", "é")
-                    .replace("√¡", "á")
-                    .replace("√³", "ó")
-                    .replace("√º", "ú")
+    if pd.isna(texto):
+        return texto
+    try:
+        texto = str(texto).encode("utf-8", "ignore").decode("utf-8", "ignore")
+        texto = (
+            texto.replace("√ë", "Ñ")
+                 .replace("√±", "ñ")
+                 .replace("√©", "é")
+                 .replace("√¡", "á")
+                 .replace("√³", "ó")
+                 .replace("√º", "ú")
         )
         # Normaliza caracteres Unicode y elimina espacios raros
         texto = unicodedata.normalize("NFKD", texto)
         return texto.strip()
-except Exception:
+    except Exception:
         return str(texto)
+
     # ------------------------------
     # 5️⃣ Validar tipos de datos básicos
     # ------------------------------
