@@ -98,7 +98,7 @@ else:
     # ------------------------------
     def limpiar_texto(texto):
         if pd.isna(texto):
-        return texto
+    return texto
         try:
         texto = str(texto).encode("utf-8", "ignore").decode("utf-8", "ignore")
         texto = (
