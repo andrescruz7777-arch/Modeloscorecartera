@@ -114,6 +114,14 @@ df_final = asignaciones.merge(prom_grouped, on="deudor", how="left")
 df_final = df_final.merge(pagos_grouped, on="deudor", how="left")
 df_final = df_final.merge(gest_grouped, on="deudor", how="left")
 
+# ============================================
+# 🧹 ELIMINAR COLUMNAS DUPLICADAS POR NOMBRE
+# ============================================
+df_final = df_final.loc[:, ~df_final.columns.duplicated()].copy()
+
+# (opcional) Reiniciar índice
+df_final.reset_index(drop=True, inplace=True)
+
 # ==========================
 # 📋 VISTA PREVIA DEL CONSOLIDADO
 # ==========================
