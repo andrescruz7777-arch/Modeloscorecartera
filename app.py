@@ -283,9 +283,6 @@ df_prom = df_prom.rename(columns={
     "fecha_de_pago_prometida": "fecha_promesa",
     "estado_final": "estado_promesa"
 })
-
-    })
-
     # Convertir tipos
     df_prom["valor_prometido"] = pd.to_numeric(df_prom["valor_prometido"], errors="coerce").fillna(0)
     df_prom["fecha_promesa"] = pd.to_datetime(df_prom["fecha_promesa"], errors="coerce")
