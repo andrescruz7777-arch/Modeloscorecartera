@@ -481,9 +481,6 @@ else:
     # =============================================
 # 📊 PASO 5A — ANÁLISIS EMPÍRICO DE EFECTIVIDAD
 # =============================================
-import io
-import base64
-import matplotlib.pyplot as plt
 
 st.title("📊 Paso 5A — Análisis Empírico de Efectividad (Producto y Mora)")
 
