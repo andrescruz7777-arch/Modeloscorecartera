@@ -495,7 +495,6 @@ else:
     # =========================
     st.success("✅ Cruce de gestiones realizado con éxito.")
     st.dataframe(df_cruce.head(10), use_container_width=True)
-
 else:
     st.info("⬆️ Sube la base de gestiones y asegúrate de haber completado el cruce de promesas antes de este paso.")
 
