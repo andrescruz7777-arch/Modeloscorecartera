@@ -380,9 +380,12 @@ elif file_promesas:
 
 else:
     st.info("⬆️ Carga la base de promesas para realizar el cruce.")
-    # =============================================
-# 📞 PASO 5 — CRUCE DE GESTIONES
+   # =============================================
+# 📞 PASO 5 — CRUCE DE GESTIONES (Contacto Solutions Jur)
 # =============================================
+
+import io
+import base64
 
 st.title("📞 Paso 5 — Cruce de Gestiones (Contacto Solutions Jur)")
 
@@ -393,23 +396,23 @@ if file_gestion and "df_limpio" in st.session_state:
     df = st.session_state["df_limpio"].copy()
 
     # =========================
-    # 1️⃣ Normalizar nombres de columnas
+    # 1️⃣ Normalizar nombres
     # =========================
     df_gest.columns = df_gest.columns.str.strip().str.lower()
     df.columns = df.columns.str.strip().str.lower()
 
-    # Mapear nombres importantes
-    col_id = next((c for c in df_gest.columns if "identific" in c.lower()), None)
-    col_mejor = next((c for c in df_gest.columns if "mejor" in c.lower()), None)
-    col_accion = next((c for c in df_gest.columns if "accion" in c.lower()), None)
-    col_resp = next((c for c in df_gest.columns if "respu" in c.lower()), None)
+    # Buscar columnas clave
+    col_id = next((c for c in df_gest.columns if "identific" in c), None)
+    col_mejor = next((c for c in df_gest.columns if "mejor" in c), None)
+    col_accion = next((c for c in df_gest.columns if "accion" in c), None)
+    col_resp = next((c for c in df_gest.columns if "respu" in c), None)
 
     if not col_id:
-        st.error("❌ No se encontró una columna con identificación del deudor en la base de gestiones.")
+        st.error("❌ No se encontró una columna de identificación del deudor.")
         st.stop()
 
     # =========================
-    # 2️⃣ Jerarquía de MEJOR GESTION
+    # 2️⃣ Jerarquía de efectividad
     # =========================
     jerarquia = {
         "1. GESTION EFECTIVA SOLUCIONA MORA": 1,
@@ -420,169 +423,107 @@ if file_gestion and "df_limpio" in st.session_state:
         "6. NO EFECTIVA": 6,
         "7. OPERATIVO": 7
     }
-
-    if col_mejor:
-        df_gest["nivel_efectividad"] = df_gest[col_mejor].map(jerarquia)
-    else:
-        df_gest["nivel_efectividad"] = 99  # valor neutro si no existe
+    df_gest["nivel_efectividad"] = df_gest[col_mejor].map(jerarquia)
 
     # =========================
-    # 3️⃣ Seleccionar la mejor gestión por deudor
+    # 3️⃣ Seleccionar la mejor gestión
     # =========================
-    df_mejor = (
-        df_gest.sort_values("nivel_efectividad", ascending=True)
-        .groupby(col_id, as_index=False)
-        .first()
-    )
+    df_mejor = df_gest.sort_values("nivel_efectividad").groupby(col_id, as_index=False).first()
 
     # =========================
-    # 4️⃣ Calcular cantidad de gestiones
+    # 4️⃣ Cantidad de gestiones
     # =========================
     df_cant = df_gest.groupby(col_id, as_index=False).size().rename(columns={"size": "cantidad_gestiones"})
 
     # =========================
-    # 5️⃣ Unir cantidad + mejor gestión
+    # 5️⃣ Unir resultados
     # =========================
     df_gest_final = pd.merge(df_mejor, df_cant, on=col_id, how="left")
+    df_gest_final["tiene_gestion_efectiva"] = df_gest_final["nivel_efectividad"].apply(lambda x: 1 if x in [1, 2] else 0)
 
     # =========================
-    # 6️⃣ Determinar si tuvo contacto real (gestión efectiva)
-    # =========================
-    if col_mejor:
-        df_gest_final["nivel_efectividad"] = df_gest_final["nivel_efectividad"].fillna(99).astype(int)
-        df_gest_final["tiene_gestion_efectiva"] = df_gest_final["nivel_efectividad"].apply(lambda x: 1 if x in [1, 2] else 0)
-    else:
-        df_gest_final["tiene_gestion_efectiva"] = 0
-
-    # =========================
-    # 7️⃣ Seleccionar columnas útiles para el cruce
+    # 6️⃣ Seleccionar columnas útiles
     # =========================
     cols_utiles = [col_id, "cantidad_gestiones", "tiene_gestion_efectiva"]
-    if col_mejor: cols_utiles.append(col_mejor)
-    if col_accion: cols_utiles.append(col_accion)
-    if col_resp: cols_utiles.append(col_resp)
+    for c in [col_mejor, col_accion, col_resp]:
+        if c: cols_utiles.append(c)
 
     df_gest_final = df_gest_final[cols_utiles]
 
     # =========================
-    # 8️⃣ Normalizar columnas de unión (identificación)
+    # 7️⃣ Cruce con base limpia
     # =========================
-    df["deudor"] = df["deudor"].astype(str).str.strip().str.replace(r"\.0$", "", regex=True)
-    df_gest_final[col_id] = df_gest_final[col_id].astype(str).str.strip().str.replace(r"\.0$", "", regex=True)
-
-    # =========================
-    # 9️⃣ Cruce con la base limpia (df_limpio)
-    # =========================
-    df_cruce = pd.merge(
-        df,
-        df_gest_final,
-        left_on="deudor",
-        right_on=col_id,
-        how="left"
-    )
-
-    # =========================
-    # 🔟 Limpieza final post-cruce
-    # =========================
+    df_cruce = pd.merge(df, df_gest_final, left_on="deudor", right_on=col_id, how="left")
     df_cruce["cantidad_gestiones"] = df_cruce["cantidad_gestiones"].fillna(0).astype(int)
     df_cruce["tiene_gestion_efectiva"] = df_cruce["tiene_gestion_efectiva"].fillna(0).astype(int)
 
-    # Renombrar columnas para consistencia
-    if col_mejor: df_cruce.rename(columns={col_mejor: "mejor_gestion"}, inplace=True)
-    if col_accion: df_cruce.rename(columns={col_accion: "accion"}, inplace=True)
-    if col_resp: df_cruce.rename(columns={col_resp: "respuesta"}, inplace=True)
-
     # =========================
-    # 🔄 Guardar en sesión
+    # 🔄 Guardar en sesión y descargar
     # =========================
     st.session_state["df_limpio"] = df_cruce
 
-    # =========================
-    # 🔍 Vista previa y resumen
-    # =========================
-    total_contactos = int(df_cruce["tiene_gestion_efectiva"].sum())
-    total_clientes = df_cruce["deudor"].nunique()
-
-    st.success(f"✅ Cruce de gestiones realizado con éxito.")
-    st.info(f"📞 Contactos efectivos: {total_contactos:,} de {total_clientes:,} clientes ({(total_contactos/total_clientes*100 if total_clientes>0 else 0):.2f}%)")
-
+    # Mostrar vista previa
+    st.success("✅ Cruce de gestiones realizado con éxito.")
     st.dataframe(df_cruce.head(10), use_container_width=True)
 
+    # 👉 NUEVO: Descarga completa de la base consolidada
+    buffer = io.BytesIO()
+    with pd.ExcelWriter(buffer, engine="xlsxwriter") as writer:
+        df_cruce.to_excel(writer, index=False, sheet_name="Base Consolidada")
+    buffer.seek(0)
+    b64 = base64.b64encode(buffer.read()).decode()
+    href = f'<a href="data:application/octet-stream;base64,{b64}" download="Base_Consolidada_Paso5.xlsx">📥 Descargar Base Consolidada (Paso 5)</a>'
+    st.markdown(href, unsafe_allow_html=True)
+
 else:
-    st.info("⬆️ Sube la base de gestiones y asegúrate de haber completado el cruce de promesas antes de este paso.")
+    st.info("⬆️ Carga la base de gestiones y asegúrate de haber completado los pasos previos.")
+
     # =============================================
 # 📊 PASO 5A — ANÁLISIS EMPÍRICO DE EFECTIVIDAD
 # =============================================
+import io
+import base64
+import matplotlib.pyplot as plt
 
 st.title("📊 Paso 5A — Análisis Empírico de Efectividad (Producto y Mora)")
 
-# =============================================
-# 🔍 Validación de existencia del DataFrame
-# =============================================
-df = st.session_state.get("df_limpio")
+# Subir base consolidada directamente
+file_consolidado = st.file_uploader("📘 Cargar base consolidada (Base_Consolidada_Paso5.xlsx)", type=["xlsx"])
 
-if df is None:
-    st.warning("⚠️ No se encontró la base limpia. Ejecuta primero los pasos de carga, limpieza y cruces (pagos, promesas y gestiones).")
-    st.stop()
-else:
-    df = df.copy()
-
-    # =========================
-    # 1️⃣ Normalizar nombres de columnas
-    # =========================
+if file_consolidado:
+    df = pd.read_excel(file_consolidado)
     df.columns = df.columns.str.strip().str.lower()
 
     # =========================
-    # 2️⃣ Verificar columnas clave
+    # Verificar columnas
     # =========================
-    col_contacto = "tiene_gestion_efectiva" if "tiene_gestion_efectiva" in df.columns else None
-    col_promesas = "cantidad_promesas" if "cantidad_promesas" in df.columns else None
-    col_pagos = "ultimo_pago" if "ultimo_pago" in df.columns else None
-
-    if not all([col_contacto, col_promesas, col_pagos]):
-        st.warning("⚠️ No se encontraron todas las columnas requeridas: gestión, promesas o pagos.")
-        st.write("Columnas disponibles:", list(df.columns))
+    cols_ok = ["grupop", "ciclo_mora_act", "deudor", "tiene_gestion_efectiva", "cantidad_promesas", "ultimo_pago"]
+    faltantes = [c for c in cols_ok if c not in df.columns]
+    if faltantes:
+        st.error(f"❌ Faltan las columnas requeridas: {faltantes}")
         st.stop()
 
     # =========================
-    # 3️⃣ Agrupar por producto y ciclo de mora
+    # Agrupar
     # =========================
     agg = (
         df.groupby(["grupop", "ciclo_mora_act"])
         .agg(
             total_clientes=("deudor", "nunique"),
-            total_contacto=(col_contacto, "sum"),
-            total_promesas=(col_promesas, "sum"),
-            total_pago_valor=(col_pagos, "sum"),
+            total_contacto=("tiene_gestion_efectiva", "sum"),
+            total_promesas=("cantidad_promesas", "sum"),
+            total_pago_valor=("ultimo_pago", "sum"),
         )
         .reset_index()
     )
 
-    # =========================
-    # 4️⃣ Calcular tasas porcentuales
-    # =========================
     agg["%_contacto"] = (agg["total_contacto"] / agg["total_clientes"] * 100).round(2)
     agg["promesas_promedio"] = (agg["total_promesas"] / agg["total_clientes"]).round(2)
     agg["pago_promedio"] = (agg["total_pago_valor"] / agg["total_clientes"]).round(0)
 
-    # =========================
-    # 5️⃣ Ordenar y mostrar resultados
-    # =========================
-    agg = agg.sort_values(by="%_contacto", ascending=False)
-
-    st.subheader("📈 Tasas de Efectividad por Producto y Ciclo de Mora")
     st.dataframe(agg, use_container_width=True)
 
-    st.markdown("### 🔍 Interpretación")
-    st.markdown("""
-    - **% Contacto:** porcentaje de deudores con al menos una gestión efectiva o contacto directo.  
-    - **Promesas Promedio:** número promedio de promesas por cliente.  
-    - **Pago Promedio:** valor promedio del último pago realizado por cliente.  
-    """)
-
-    # =========================
-    # 6️⃣ Exportar a Excel
-    # =========================
+    # Exportar análisis
     buffer = io.BytesIO()
     with pd.ExcelWriter(buffer, engine="xlsxwriter") as writer:
         agg.to_excel(writer, index=False, sheet_name="Efectividad")
@@ -591,11 +532,7 @@ else:
     href = f'<a href="data:application/octet-stream;base64,{b64}" download="Analisis_Efectividad_Cartera.xlsx">📥 Descargar análisis empírico en Excel</a>'
     st.markdown(href, unsafe_allow_html=True)
 
-    # =========================
-    # 7️⃣ Visualización comparativa
-    # =========================
-    st.markdown("### 📊 Comparativo de Contacto, Promesas y Pagos por Producto")
-
+    # Gráfico
     fig, ax1 = plt.subplots(figsize=(10, 6))
     ax1.bar(agg["grupop"], agg["%_contacto"], label="% Contacto", alpha=0.7)
     ax1.plot(agg["grupop"], agg["promesas_promedio"], color="orange", marker="o", label="Promesas promedio")
@@ -611,4 +548,7 @@ else:
     st.pyplot(fig)
 
     st.success("✅ Análisis empírico completado correctamente.")
+else:
+    st.info("⬆️ Carga la base consolidada del Paso 5 para ejecutar este análisis.")
+
 
