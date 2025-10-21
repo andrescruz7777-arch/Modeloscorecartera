@@ -96,7 +96,7 @@ else:
     # ------------------------------
     # 4️⃣ Corrección de caracteres especiales (encoding)
     # ------------------------------
-    def limpiar_texto(texto):
+def limpiar_texto(texto):
     if pd.isna(texto):
         return texto
     try:
