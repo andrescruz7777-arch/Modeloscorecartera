@@ -259,5 +259,5 @@ def safe_days_diff(fecha):
 
             except Exception as e:
                 st.error(f"❌ Error al analizar el archivo: {e}")
-else:
-    st.info("Carga los 5 archivos (Asignaciones enero–marzo, abril–septiembre, Promesas, Pagos y Gestión) para iniciar.")
+            else:
+                st.info("Carga los 5 archivos (Asignaciones enero–marzo, abril–septiembre, Promesas, Pagos y Gestión) para iniciar.")
