@@ -531,6 +531,7 @@ elif file_gestion:
 
 else:
     st.info("⬆️ Carga la base de gestiones para realizar el cruce.")
+    
     # =============================================
 # 📊 PASO 5A — ANÁLISIS EMPÍRICO DE EFECTIVIDAD
 # =============================================
