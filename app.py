@@ -534,9 +534,11 @@ elif file_gestion:
 
 else:
     st.info("⬆️ Carga la base de gestiones para realizar el cruce.")
-    # =============================================
+   # =============================================
 # 📊 PASO 5A — ANÁLISIS EMPÍRICO DE EFECTIVIDAD
 # =============================================
+import io
+import base64
 
 st.title("📊 Paso 5A — Análisis Empírico de Efectividad (Producto y Mora)")
 
@@ -555,30 +557,43 @@ else:
     # 1️⃣ Normalizar columnas clave
     # =========================
     df.columns = df.columns.str.strip().str.lower()
+
     df.rename(columns={
         "grupop": "grupop",
-        "ciclo_mora_act": "ciclo_mora_act",
-        "mejor_gestion": "mejor_gestion",
-        "capital_act": "capital_act",
+        "ciclo mora act": "ciclo_mora_act",
+        "capital act": "capital_act",
         "deudor": "deudor"
     }, inplace=True)
 
     # =========================
-    # 2️⃣ Crear indicadores binarios
+    # 2️⃣ Identificar columna de gestión automáticamente
     # =========================
-    df["tiene_gestion_efectiva"] = (
-        df["mejor_gestion"].astype(str)
-        .str.contains("EFECTIVA|CONTACTO", case=False, na=False)
-        .astype(int)
-    )
+    col_gestion = None
+    for c in df.columns:
+        if "gestion" in c.lower():
+            col_gestion = c
+            break
 
+    if col_gestion:
+        df["tiene_gestion_efectiva"] = (
+            df[col_gestion].astype(str)
+            .str.contains("EFECTIVA|CONTACTO", case=False, na=False)
+            .astype(int)
+        )
+    else:
+        st.warning("⚠️ No se encontró ninguna columna relacionada con 'gestión'. Se asignarán ceros por defecto.")
+        df["tiene_gestion_efectiva"] = 0
+
+    # =========================
+    # 3️⃣ Validar columnas de promesa y pago
+    # =========================
     if "tiene_promesa" not in df.columns:
         df["tiene_promesa"] = 0
     if "tiene_pago" not in df.columns:
         df["tiene_pago"] = 0
 
     # =========================
-    # 3️⃣ Agrupar por producto y ciclo de mora
+    # 4️⃣ Agrupar por producto y ciclo de mora
     # =========================
     agg = (
         df.groupby(["grupop", "ciclo_mora_act"])
@@ -592,7 +607,7 @@ else:
     )
 
     # =========================
-    # 4️⃣ Calcular tasas porcentuales
+    # 5️⃣ Calcular tasas porcentuales
     # =========================
     agg["%_contacto"] = (agg["total_contacto"] / agg["total_clientes"] * 100).round(2)
     agg["%_promesa"] = (agg["total_promesa"] / agg["total_clientes"] * 100).round(2)
@@ -601,7 +616,7 @@ else:
     agg = agg.sort_values(by="%_contacto", ascending=False)
 
     # =========================
-    # 5️⃣ Mostrar resultados
+    # 6️⃣ Mostrar resultados
     # =========================
     st.subheader("📈 Tasas de Efectividad por Producto y Ciclo de Mora")
     st.dataframe(agg, use_container_width=True)
@@ -614,7 +629,7 @@ else:
     """)
 
     # =========================
-    # 6️⃣ Exportar a Excel
+    # 7️⃣ Exportar a Excel
     # =========================
     buffer = io.BytesIO()
     with pd.ExcelWriter(buffer, engine="xlsxwriter") as writer:
@@ -625,4 +640,3 @@ else:
     st.markdown(href, unsafe_allow_html=True)
 
     st.success("✅ Análisis completado con éxito. Usa este resultado para calibrar los pesos reales del modelo.")
-
