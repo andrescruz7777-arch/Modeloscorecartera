@@ -115,22 +115,15 @@ df_final = df_final.merge(pagos_grouped, on="deudor", how="left")
 df_final = df_final.merge(gest_grouped, on="deudor", how="left")
 
 st.subheader("📋 Vista previa del consolidado (primeros 10 clientes)")
-File "/home/adminuser/venv/lib/python3.10/site-packages/streamlit/runtime/scriptrunner/exec_code.py", line 88, in exec_func_with_error_handling
-    result = func()
-File "/home/adminuser/venv/lib/python3.10/site-packages/streamlit/runtime/scriptrunner/script_runner.py", line 590, in code_to_exec
-    exec(code, module.__dict__)
-File "/mount/src/modeloscorecartera/app.py", line 118, in <module>
-    st.dataframe(df_final.head(10), use_container_width=True)
-File "/home/adminuser/venv/lib/python3.10/site-packages/streamlit/runtime/metrics_util.py", line 410, in wrapped_func
-    result = non_optional_func(*args, **kwargs)
-File "/home/adminuser/venv/lib/python3.10/site-packages/streamlit/elements/arrow.py", line 554, in dataframe
-    proto.data = dataframe_util.convert_pandas_df_to_arrow_bytes(data_df)
-File "/home/adminuser/venv/lib/python3.10/site-packages/streamlit/dataframe_util.py", line 815, in convert_pandas_df_to_arrow_bytes
-    table = pa.Table.from_pandas(df)
-File "pyarrow/table.pxi", line 4795, in pyarrow.lib.Table.from_pandas
-File "/home/adminuser/venv/lib/python3.10/site-packages/pyarrow/pandas_compat.py", line 594, in dataframe_to_arrays convert_fields) = _get_columns_to_convert(df, schema, preserve_index,
-File "/home/adminuser/venv/lib/python3.10/site-packages/pyarrow/pandas_compat.py", line 374, in _get_columns_to_convert
-    raise ValueError(
+# Limpieza previa para evitar errores de visualización
+df_preview = df_final.head(10).copy()
+for col in df_preview.columns:
+    try:
+        df_preview[col] = df_preview[col].astype(str)
+    except Exception:
+        df_preview[col] = df_preview[col].apply(lambda x: str(x) if not isinstance(x, str) else x)
+
+st.dataframe(df_preview, use_container_width=True)
 
     # ==========================
     # 🤖 MODELO DE SCORE
