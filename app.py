@@ -114,7 +114,6 @@ else:
         return texto.strip()
     except Exception:
         return str(texto)
-
     # ------------------------------
     # 5️⃣ Validar tipos de datos básicos
     # ------------------------------
