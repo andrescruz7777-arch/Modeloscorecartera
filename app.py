@@ -51,11 +51,13 @@ else:
      # ------------------------------
     #🧩 Paso 2 — Limpieza y Transformación de Datos
     # ------------------------------
-st.title("🧩 Paso 2 — Limpieza y Transformación de Datos")
+st.title("🧩 Paso 2 — Limpieza y Transformación de Datos (Versión Final)")
 
-# Recuperar el DataFrame unificado del paso anterior
+# =====================================
+#  Recuperar el DataFrame unificado
+# =====================================
 if "df_unificado" not in st.session_state:
-    st.warning("⚠️ Primero completa el Paso 1 (carga de datos).")
+    st.warning("⚠️ Primero completa el Paso 1 (Carga de datos).")
 else:
     df = st.session_state["df_unificado"].copy()
 
@@ -63,10 +65,10 @@ else:
     # 1️⃣ Estandarizar nombres de columnas
     # ------------------------------
     df.columns = (
-        df.columns.str.strip()  # quitar espacios al inicio y final
-                 .str.lower()    # minúsculas
-                 .str.replace(" ", "_")  # reemplazar espacios por guión bajo
-                 .str.replace("[^a-z0-9_]", "", regex=True)  # eliminar caracteres raros
+        df.columns.str.strip()
+                  .str.lower()
+                  .str.replace(" ", "_")
+                  .str.replace("[^a-z0-9_]", "", regex=True)
     )
 
     # ------------------------------
@@ -77,7 +79,7 @@ else:
         st.info("🧹 Columna 'sand' eliminada correctamente.")
 
     # ------------------------------
-    # 3️⃣ Agregar columnas faltantes
+    # 3️⃣ Agregar columnas faltantes (de abril-septiembre)
     # ------------------------------
     columnas_nuevas = [
         "año_pase_juridico",
@@ -91,77 +93,57 @@ else:
         if col not in df.columns:
             df[col] = None
 
-    st.success("✅ Columnas unificadas correctamente.")
+    # ------------------------------
+    # 4️⃣ Corrección de caracteres especiales (encoding)
+    # ------------------------------
+    def limpiar_texto(texto):
+        if pd.isna(texto):
+            return texto
+        texto = str(texto)
+        # Corrige errores comunes de codificación
+        texto = (
+            texto.replace("√ë", "Ñ")
+                 .replace("√±", "ñ")
+                 .replace("√©", "é")
+                 .replace("√¡", "á")
+                 .replace("√³", "ó")
+                 .replace("√º", "ú")
+        )
+        # Normaliza acentos y elimina caracteres invisibles
+        texto = unicodedata.normalize("NFKC", texto)
+        return texto.strip()
+
+    # Aplicar limpieza solo a columnas de texto
+    for col in df.select_dtypes(include="object").columns:
+        df[col] = df[col].apply(limpiar_texto)
+
+    st.info("✅ Se corrigieron caracteres mal codificados en texto (eñes, tildes, etc.)")
 
     # ------------------------------
-    # 4️⃣ Validar tipos de datos básicos
+    # 5️⃣ Validar tipos de datos básicos
     # ------------------------------
-    # Intentar convertir a número algunas columnas comunes
-    columnas_numericas = [c for c in df.columns if "monto" in c or "valor" in c or "saldo" in c or "cuota" in c]
+    columnas_numericas = [c for c in df.columns if any(x in c for x in ["monto", "valor", "saldo", "cuota"])]
     for col in columnas_numericas:
         df[col] = pd.to_numeric(df[col], errors="coerce")
 
     # ------------------------------
-    # 5️⃣ Resumen general del DataFrame limpio
+    # 6️⃣ Mostrar resumen de la limpieza
     # ------------------------------
     st.subheader("📊 Vista previa del DataFrame limpio")
-    st.dataframe(df.head(10))
+    st.dataframe(df.head(10), use_container_width=True)
 
     st.markdown("### 📋 Columnas finales:")
     st.write(list(df.columns))
 
-    st.markdown("### 🧮 Información general del DataFrame:")
-    st.write(df.info())
-
-    st.markdown("### 📏 Resumen estadístico (numérico):")
-    st.dataframe(df.describe())
-
-    # Guardar DataFrame limpio para el siguiente paso
-    st.session_state["df_limpio"] = df
-    import streamlit as st
-
-st.title("📘 Vista de la Base Consolidada (Enero a Septiembre)")
-
-if "df_limpio" not in st.session_state:
-    st.warning("⚠️ Primero completa el Paso 2 (Limpieza y Transformación).")
-else:
-    df = st.session_state["df_limpio"]
-
-    # =============================
-    # 🔍 EXPLORADOR INTERACTIVO
-    # =============================
-    st.markdown("### 🔎 Visualiza y filtra la base completa")
-
-    # Selector de columnas
-    columnas_mostrar = st.multiselect(
-        "Selecciona columnas a visualizar:",
-        options=list(df.columns),
-        default=list(df.columns)[:10]
-    )
-
-    # Muestra el DataFrame
-    st.dataframe(df[columnas_mostrar].head(50), use_container_width=True)
-
-    # =============================
-    # 📏 RESUMEN GENERAL
-    # =============================
-    st.markdown("### 📊 Información general del DataFrame")
-    st.write(f"Filas totales: **{df.shape[0]:,}**")
-    st.write(f"Columnas totales: **{df.shape[1]:,}**")
-
     st.markdown("### 📈 Resumen estadístico (variables numéricas)")
     st.dataframe(df.describe())
 
-    # =============================
-    # 💾 DESCARGA OPCIONAL
-    # =============================
-    csv = df.to_csv(index=False).encode("utf-8")
-    st.download_button(
-        label="💾 Descargar base consolidada (CSV)",
-        data=csv,
-        file_name="base_unificada_limpia.csv",
-        mime="text/csv"
-    )
+    # ------------------------------
+    # 7️⃣ Guardar resultado final
+    # ------------------------------
+    st.session_state["df_limpio"] = df
+    st.success("✅ Base lista y guardada como `df_limpio` para el siguiente paso (análisis exploratorio o modelo).")
+
 
 
 
