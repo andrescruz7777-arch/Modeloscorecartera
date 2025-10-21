@@ -128,8 +128,7 @@ File "/home/adminuser/venv/lib/python3.10/site-packages/streamlit/elements/arrow
 File "/home/adminuser/venv/lib/python3.10/site-packages/streamlit/dataframe_util.py", line 815, in convert_pandas_df_to_arrow_bytes
     table = pa.Table.from_pandas(df)
 File "pyarrow/table.pxi", line 4795, in pyarrow.lib.Table.from_pandas
-File "/home/adminuser/venv/lib/python3.10/site-packages/pyarrow/pandas_compat.py", line 594, in dataframe_to_arrays
-convert_fields) = _get_columns_to_convert(df, schema, preserve_index,
+File "/home/adminuser/venv/lib/python3.10/site-packages/pyarrow/pandas_compat.py", line 594, in dataframe_to_arrays convert_fields) = _get_columns_to_convert(df, schema, preserve_index,
 File "/home/adminuser/venv/lib/python3.10/site-packages/pyarrow/pandas_compat.py", line 374, in _get_columns_to_convert
     raise ValueError(
 
