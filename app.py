@@ -48,4 +48,75 @@ if file_ene_mar and file_abr_sep:
     st.session_state["df_unificado"] = df_unificado
 else:
     st.info("⬆️ Sube ambos archivos para iniciar la exploración.")
+     # ------------------------------
+    # 1️⃣ Estandarizar nombres de columnas
+    # ------------------------------
+st.title("🧩 Paso 2 — Limpieza y Transformación de Datos")
+
+# Recuperar el DataFrame unificado del paso anterior
+if "df_unificado" not in st.session_state:
+    st.warning("⚠️ Primero completa el Paso 1 (carga de datos).")
+else:
+    df = st.session_state["df_unificado"].copy()
+
+    # ------------------------------
+    # 1️⃣ Estandarizar nombres de columnas
+    # ------------------------------
+    df.columns = (
+        df.columns.str.strip()  # quitar espacios al inicio y final
+                 .str.lower()    # minúsculas
+                 .str.replace(" ", "_")  # reemplazar espacios por guión bajo
+                 .str.replace("[^a-z0-9_]", "", regex=True)  # eliminar caracteres raros
+    )
+
+    # ------------------------------
+    # 2️⃣ Eliminar columna "sand" si existe
+    # ------------------------------
+    if "sand" in df.columns:
+        df = df.drop(columns=["sand"])
+        st.info("🧹 Columna 'sand' eliminada correctamente.")
+
+    # ------------------------------
+    # 3️⃣ Agregar columnas faltantes
+    # ------------------------------
+    columnas_nuevas = [
+        "año_pase_juridico",
+        "mes_pase_juridico",
+        "ciclo_mora_ini",
+        "cod_convenio",
+        "nom_convenio"
+    ]
+
+    for col in columnas_nuevas:
+        if col not in df.columns:
+            df[col] = None
+
+    st.success("✅ Columnas unificadas correctamente.")
+
+    # ------------------------------
+    # 4️⃣ Validar tipos de datos básicos
+    # ------------------------------
+    # Intentar convertir a número algunas columnas comunes
+    columnas_numericas = [c for c in df.columns if "monto" in c or "valor" in c or "saldo" in c or "cuota" in c]
+    for col in columnas_numericas:
+        df[col] = pd.to_numeric(df[col], errors="coerce")
+
+    # ------------------------------
+    # 5️⃣ Resumen general del DataFrame limpio
+    # ------------------------------
+    st.subheader("📊 Vista previa del DataFrame limpio")
+    st.dataframe(df.head(10))
+
+    st.markdown("### 📋 Columnas finales:")
+    st.write(list(df.columns))
+
+    st.markdown("### 🧮 Información general del DataFrame:")
+    st.write(df.info())
+
+    st.markdown("### 📏 Resumen estadístico (numérico):")
+    st.dataframe(df.describe())
+
+    # Guardar DataFrame limpio para el siguiente paso
+    st.session_state["df_limpio"] = df
+
 
