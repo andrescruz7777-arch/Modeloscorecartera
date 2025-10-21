@@ -131,7 +131,7 @@ if st.button("Calcular probabilidad de pago para toda la base"):
 def safe_days_diff(fecha):
     try:
         return (pd.Timestamp.today() - pd.to_datetime(fecha)).days
-        except:
+    except:
             return np.nan
 
             df_modelo["dias_desde_ultimo_pago"] = df_modelo["pagos_fecha_de_pago"].apply(safe_days_diff) if "pagos_fecha_de_pago" in df_modelo else 0
