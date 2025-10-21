@@ -230,7 +230,7 @@ except Exception as e:
         # Mostrar resultados y botón de descarga
         # ----------------------------
     st.success("✅ Score calculado correctamente")
-        st.dataframe(
+    st.dataframe(
             df_modelo[["deudor", "probabilidad_pago", "score_recuperacion", "segmento_recuperacion"]].head(20),
             use_container_width=True
         )
