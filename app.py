@@ -188,13 +188,34 @@ if st.button("Calcular probabilidad de pago para toda la base"):
         X_scaled = scaler.fit_transform(X)
 
         # ----------------------------
-        # Modelo logístico (base)
-        # ----------------------------
-        y = (X_scaled[:, 0]*-0.3 + X_scaled[:, 2]*0.6 + X_scaled[:, 3]*0.4 + X_scaled[:, 6]*0.5) > 0.5
-        y = y.astype(int)
-        model = LogisticRegression()
+# Modelo logístico base (sintético) — versión robusta
+# ----------------------------
+try:
+    # Generar etiqueta sintética
+    y = (X_scaled[:, 0]*-0.3 + X_scaled[:, 2]*0.6 + X_scaled[:, 3]*0.4 + X_scaled[:, 6]*0.5) > 0.5
+    y = y.astype(int)
+
+    # Validar dimensiones
+    if X_scaled.shape[0] != len(y):
+        st.error(f"❌ Tamaños inconsistentes: X tiene {X_scaled.shape[0]} filas y y tiene {len(y)}.")
+        st.stop()
+
+    # Validar que haya más de una clase
+    if len(np.unique(y)) < 2:
+        st.warning("⚠️ No hay variación en la variable objetivo (y). Se asignará probabilidad constante 0.5.")
+        prob_pago = np.full(X_scaled.shape[0], 0.5)
+    else:
+        # Limpieza de NaN / Inf
+        X_scaled = np.nan_to_num(X_scaled, nan=0.0, posinf=0.0, neginf=0.0)
+
+        model = LogisticRegression(max_iter=200)
         model.fit(X_scaled, y)
         prob_pago = model.predict_proba(X_scaled)[:, 1]
+
+except Exception as e:
+    st.error(f"❌ Error al ajustar el modelo: {e}")
+    st.info("Se asignará probabilidad base de 0.5 a todos los registros.")
+    prob_pago = np.full(X_scaled.shape[0], 0.5)
 
         df_modelo["probabilidad_pago"] = np.round(prob_pago, 4)
         df_modelo["score_recuperacion"] = np.round(df_modelo["probabilidad_pago"] * 100, 2)
