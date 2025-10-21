@@ -236,18 +236,120 @@ elif file_pagos:
 else:
     st.info("⬆️ Carga la base de pagos para realizar el cruce.")
     # ============================================
-# 🧾 VISTA RÁPIDA DE BASE DE PROMESAS
+# 🤝 PASO 4 — CRUCE CON PROMESAS DE PAGO (incluye RECURSO)
 # ============================================
-st.title("🧾 Vista previa de la Base de Promesas de Pago")
+st.title("🤝 Paso 4 — Cruce de Base Jurídica + Pagos con Promesas de Pago")
 
+# Subir archivo de promesas
 file_promesas = st.file_uploader("📗 Cargar base de promesas (promesas_sudameris.xlsx)", type=["xlsx"])
 
-if file_promesas:
-    df_promesas = pd.read_excel(file_promesas)
-    st.subheader("📋 Columnas detectadas en la base de promesas:")
-    st.write(list(df_promesas.columns))
-    st.subheader("👀 Vista previa:")
-    st.dataframe(df_promesas.head(10))
-else:
-    st.info("⬆️ Sube la base de promesas para analizar su estructura.")
+if "df_cruce_pagos" not in st.session_state:
+    st.warning("⚠️ Primero completa los pasos anteriores (base jurídica + pagos).")
 
+elif file_promesas:
+    # Leer base de promesas
+    df_prom = pd.read_excel(file_promesas)
+
+    st.subheader("🧾 Vista previa de la base de promesas")
+    st.dataframe(df_prom.head())
+
+    # ------------------------------
+    # 🔧 Estandarizar columnas
+    # ------------------------------
+    df_prom.columns = (
+        df_prom.columns.str.strip()
+                       .str.lower()
+                       .str.replace(" ", "_")
+                       .str.replace("[^a-z0-9_]", "", regex=True)
+    )
+
+    # Renombrar columnas clave
+    df_prom = df_prom.rename(columns={
+        "deudor_identificación": "documento",
+        "valor_acuerdo": "valor_prometido",
+        "fecha_de_pago_prometida": "fecha_promesa",
+        "estado_final": "estado_promesa"
+    })
+
+    # Convertir tipos
+    df_prom["valor_prometido"] = pd.to_numeric(df_prom["valor_prometido"], errors="coerce").fillna(0)
+    df_prom["fecha_promesa"] = pd.to_datetime(df_prom["fecha_promesa"], errors="coerce")
+
+    # ------------------------------
+    # 🧮 Agrupar promesas por documento
+    # ------------------------------
+    resumen_promesas = (
+        df_prom.groupby("documento", dropna=False)
+        .agg({
+            "valor_prometido": ["sum", "count"],
+            "fecha_promesa": "max",
+            "estado_promesa": "last",
+            "recurso": "last"
+        })
+    )
+
+    resumen_promesas.columns = [
+        "valor_total_prometido",
+        "cantidad_promesas",
+        "fecha_ultima_promesa",
+        "estado_promesa",
+        "recurso"
+    ]
+    resumen_promesas = resumen_promesas.reset_index()
+
+    # Normalizar la variable RECURSO
+    resumen_promesas["recurso"] = (
+        resumen_promesas["recurso"]
+        .astype(str)
+        .str.upper()
+        .str.strip()
+        .replace({
+            "NAN": None,
+            "": None,
+            "COMPRA": "COMPRA_CARTERA",
+            "PROPIO": "PROPIO"
+        })
+    )
+
+    resumen_promesas["tiene_promesa"] = (resumen_promesas["cantidad_promesas"] > 0).astype(int)
+
+    # ------------------------------
+    # 🔗 Cruce con la base jurídica + pagos
+    # ------------------------------
+    df_base = st.session_state["df_cruce_pagos"].copy()
+    df_base["deudor"] = df_base["deudor"].astype(str)
+    resumen_promesas["documento"] = resumen_promesas["documento"].astype(str)
+
+    df_cruce_promesas = df_base.merge(
+        resumen_promesas,
+        how="left",
+        left_on="deudor",
+        right_on="documento"
+    )
+
+    # Rellenar valores nulos
+    for col in ["tiene_promesa", "valor_total_prometido", "cantidad_promesas"]:
+        df_cruce_promesas[col] = df_cruce_promesas[col].fillna(0).astype(int)
+    df_cruce_promesas["recurso"] = df_cruce_promesas["recurso"].fillna("SIN_DATOS")
+
+    # ------------------------------
+    # 📊 Resumen y vista previa
+    # ------------------------------
+    st.success("✅ Cruce con promesas realizado correctamente.")
+    st.write(f"Total de registros jurídicos: {len(df_base):,}")
+    st.write(f"Deudores con promesa registrada: {df_cruce_promesas['tiene_promesa'].sum():,}")
+
+    st.subheader("📊 Vista previa del consolidado jurídico + pagos + promesas")
+    cols_prev = [
+        "deudor", "tiene_pago", "cantidad_pagos", "total_pagado", "fecha_ultimo_pago",
+        "tiene_promesa", "cantidad_promesas", "valor_total_prometido",
+        "fecha_ultima_promesa", "estado_promesa", "recurso"
+    ]
+    cols_prev = [c for c in cols_prev if c in df_cruce_promesas.columns]
+    st.dataframe(df_cruce_promesas[cols_prev].head(20))
+
+    # Guardar para el siguiente paso
+    st.session_state["df_cruce_promesas"] = df_cruce_promesas
+
+else:
+    st.info("⬆️ Carga la base de promesas para realizar el cruce.")
