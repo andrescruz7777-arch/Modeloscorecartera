@@ -510,13 +510,9 @@ if file_gestion and "df_limpio" in st.session_state:
 
 else:
     st.info("⬆️ Sube la base de gestiones y asegúrate de haber completado el cruce de promesas antes de este paso.")
-
-
-   # =============================================
+    # =============================================
 # 📊 PASO 5A — ANÁLISIS EMPÍRICO DE EFECTIVIDAD
 # =============================================
-import io
-import base64
 
 st.title("📊 Paso 5A — Análisis Empírico de Efectividad (Producto y Mora)")
 
@@ -526,88 +522,66 @@ st.title("📊 Paso 5A — Análisis Empírico de Efectividad (Producto y Mora)"
 df = st.session_state.get("df_limpio")
 
 if df is None:
-    st.warning("⚠️ No se encontró la base limpia. Ejecuta primero los pasos de carga, limpieza y cruces (pagos y promesas).")
+    st.warning("⚠️ No se encontró la base limpia. Ejecuta primero los pasos de carga, limpieza y cruces (pagos, promesas y gestiones).")
     st.stop()
 else:
     df = df.copy()
 
     # =========================
-    # 1️⃣ Normalizar columnas clave
+    # 1️⃣ Normalizar nombres de columnas
     # =========================
     df.columns = df.columns.str.strip().str.lower()
 
-    df.rename(columns={
-        "grupop": "grupop",
-        "ciclo mora act": "ciclo_mora_act",
-        "capital act": "capital_act",
-        "deudor": "deudor"
-    }, inplace=True)
+    # =========================
+    # 2️⃣ Verificar columnas clave
+    # =========================
+    col_contacto = "tiene_gestion_efectiva" if "tiene_gestion_efectiva" in df.columns else None
+    col_promesas = "cantidad_promesas" if "cantidad_promesas" in df.columns else None
+    col_pagos = "ultimo_pago" if "ultimo_pago" in df.columns else None
+
+    if not all([col_contacto, col_promesas, col_pagos]):
+        st.warning("⚠️ No se encontraron todas las columnas requeridas: gestión, promesas o pagos.")
+        st.write("Columnas disponibles:", list(df.columns))
+        st.stop()
 
     # =========================
-    # 2️⃣ Identificar columna de gestión automáticamente
-    # =========================
-    col_gestion = None
-    for c in df.columns:
-        if "gestion" in c.lower():
-            col_gestion = c
-            break
-
-    if col_gestion:
-        df["tiene_gestion_efectiva"] = (
-            df[col_gestion].astype(str)
-            .str.contains("EFECTIVA|CONTACTO", case=False, na=False)
-            .astype(int)
-        )
-    else:
-        st.warning("⚠️ No se encontró ninguna columna relacionada con 'gestión'. Se asignarán ceros por defecto.")
-        df["tiene_gestion_efectiva"] = 0
-
-    # =========================
-    # 3️⃣ Validar columnas de promesa y pago
-    # =========================
-    if "tiene_promesa" not in df.columns:
-        df["tiene_promesa"] = 0
-    if "tiene_pago" not in df.columns:
-        df["tiene_pago"] = 0
-
-    # =========================
-    # 4️⃣ Agrupar por producto y ciclo de mora
+    # 3️⃣ Agrupar por producto y ciclo de mora
     # =========================
     agg = (
         df.groupby(["grupop", "ciclo_mora_act"])
         .agg(
             total_clientes=("deudor", "nunique"),
-            total_contacto=("tiene_gestion_efectiva", "sum"),
-            total_promesa=("tiene_promesa", "sum"),
-            total_pago=("tiene_pago", "sum"),
+            total_contacto=(col_contacto, "sum"),
+            total_promesas=(col_promesas, "sum"),
+            total_pago_valor=(col_pagos, "sum"),
         )
         .reset_index()
     )
 
     # =========================
-    # 5️⃣ Calcular tasas porcentuales
+    # 4️⃣ Calcular tasas porcentuales
     # =========================
     agg["%_contacto"] = (agg["total_contacto"] / agg["total_clientes"] * 100).round(2)
-    agg["%_promesa"] = (agg["total_promesa"] / agg["total_clientes"] * 100).round(2)
-    agg["%_pago"] = (agg["total_pago"] / agg["total_clientes"] * 100).round(2)
+    agg["promesas_promedio"] = (agg["total_promesas"] / agg["total_clientes"]).round(2)
+    agg["pago_promedio"] = (agg["total_pago_valor"] / agg["total_clientes"]).round(0)
 
+    # =========================
+    # 5️⃣ Ordenar y mostrar resultados
+    # =========================
     agg = agg.sort_values(by="%_contacto", ascending=False)
 
-    # =========================
-    # 6️⃣ Mostrar resultados
-    # =========================
     st.subheader("📈 Tasas de Efectividad por Producto y Ciclo de Mora")
     st.dataframe(agg, use_container_width=True)
 
     st.markdown("### 🔍 Interpretación")
     st.markdown("""
-    - **% Contacto:** porcentaje de deudores con al menos una gestión efectiva o contacto real.  
-    - **% Promesa:** porcentaje de deudores que realizaron una promesa de pago.  
-    - **% Pago:** porcentaje de deudores que registraron al menos un pago.  
+    - **% Contacto:** porcentaje de deudores con al menos una gestión efectiva o contacto directo.  
+    - **Promesas Promedio:** número promedio de promesas por cliente.  
+    - **Pago Promedio:** valor promedio del último pago realizado por cliente.  
     """)
 
     # =========================
-    # 7️⃣ Exportar a Excel
+    # 6️⃣ Exportar a Excel
     # =========================
     buffer = io.BytesIO()
     with pd.ExcelWriter(buffer, engine="xlsxwriter") as writer:
@@ -617,4 +591,24 @@ else:
     href = f'<a href="data:application/octet-stream;base64,{b64}" download="Analisis_Efectividad_Cartera.xlsx">📥 Descargar análisis empírico en Excel</a>'
     st.markdown(href, unsafe_allow_html=True)
 
-    st.success("✅ Análisis completado con éxito. Usa este resultado para calibrar los pesos reales del modelo.")
+    # =========================
+    # 7️⃣ Visualización comparativa
+    # =========================
+    st.markdown("### 📊 Comparativo de Contacto, Promesas y Pagos por Producto")
+
+    fig, ax1 = plt.subplots(figsize=(10, 6))
+    ax1.bar(agg["grupop"], agg["%_contacto"], label="% Contacto", alpha=0.7)
+    ax1.plot(agg["grupop"], agg["promesas_promedio"], color="orange", marker="o", label="Promesas promedio")
+    ax2 = ax1.twinx()
+    ax2.plot(agg["grupop"], agg["pago_promedio"], color="green", marker="s", label="Pago promedio ($)")
+
+    ax1.set_xlabel("Producto (GrupoP)")
+    ax1.set_ylabel("% Contacto / Promesas")
+    ax2.set_ylabel("Pago promedio ($)")
+    ax1.set_title("Indicadores de efectividad por producto")
+    ax1.legend(loc="upper left")
+    ax2.legend(loc="upper right")
+    st.pyplot(fig)
+
+    st.success("✅ Análisis empírico completado correctamente.")
+
