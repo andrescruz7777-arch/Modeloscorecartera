@@ -542,8 +542,11 @@ st.title("📊 Paso 5A — Análisis Empírico de Efectividad (Producto y Mora)"
 if "df_limpio" not in st.session_state:
     st.warning("⚠️ Primero completa los pasos anteriores (limpieza, pagos y promesas).")
 else:
-    df = st.session_state["df_limpio"].copy()
-
+    df = st.session_state.get("df_limpio"
+    if df is None:
+        st.warning("⚠️ No se encontró la base limpia. Ejecuta primero los pasos de carga y limpieza.")
+    else:
+        df = df.copy()
     # =========================
     # 1️⃣ Normalizar columnas clave
     # =========================
