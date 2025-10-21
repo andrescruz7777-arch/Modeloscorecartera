@@ -143,8 +143,11 @@ def limpiar_texto(texto):
     # ------------------------------
 st.title("📊 Paso 3 — Análisis Exploratorio de Datos (EDA)")
 
+# ✅ Recuperar DataFrame limpio si existe o volver a generarlo desde el unificado
 if "df_limpio" not in st.session_state:
-    st.warning("⚠️ Primero completa el Paso 2 (Limpieza y Transformación).")
+    if "df_unificado" in st.session_state:
+        st.session_state["df_limpio"] = st.session_state["df_unificado"].copy()
+        st.warning("⚠️ Se restauró la base desde df_unificado. Ejecuta nuevamente el Paso 2 si aún no aplicaste la limpieza final.")
 else:
     df = st.session_state["df_limpio"]
 
