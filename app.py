@@ -69,7 +69,7 @@ else:
     st.warning("⚠️ Primero completa el Paso 1.")
 
 # ============================================
-# 💰 PASO 3 — CRUCE CON PAGOS
+# 💰 PASO 3 — CRUCE CON PAGOS (VERSIÓN BLINDADA)
 # ============================================
 st.title("💰 Paso 3 — Cruce de Base Jurídica con Pagos")
 
@@ -81,17 +81,17 @@ elif file_pagos:
     df_pagos = pd.read_excel(file_pagos)
     df_pagos.columns = df_pagos.columns.str.lower().str.strip().str.replace(" ", "_")
 
-    # 🔎 Detectar columnas clave automáticamente
+    # 🔍 Detectar columnas clave
     col_doc = next((c for c in df_pagos.columns if "document" in c or "identific" in c), None)
     col_valor = next(
-        (c for c in df_pagos.columns if "total_de_pago" in c or "total_pago" in c or "valor_pago" in c or "valor" in c or "monto" in c),
+        (c for c in df_pagos.columns if "total_de_pago" in c or "valor_pago" in c or "valor" in c or "monto" in c),
         None
     )
     col_fecha = next((c for c in df_pagos.columns if "fecha" in c and "pago" in c), None)
 
-    # 🚨 Validación de columnas
+    # 🚨 Validar detección
     if not col_doc or not col_valor:
-        st.error(f"❌ No se encontraron columnas válidas en pagos. Columnas detectadas: {list(df_pagos.columns)}")
+        st.error(f"❌ No se encontraron columnas válidas en la base de pagos. Columnas detectadas: {list(df_pagos.columns)}")
         st.stop()
 
     # 🧩 Renombrar columnas detectadas
@@ -105,28 +105,39 @@ elif file_pagos:
     if "fecha_pago" in df_pagos.columns:
         df_pagos["fecha_pago"] = pd.to_datetime(df_pagos["fecha_pago"], errors="coerce")
 
-    # 💡 Agrupar pagos por documento
-    pagos_agg = (
-        df_pagos.groupby("documento", dropna=False)
-        .agg(total_pagado=("valor_pago", "sum"),
-             cantidad_pagos=("valor_pago", "count"),
-             fecha_ultimo_pago=("fecha_pago", "max") if "fecha_pago" in df_pagos.columns else ("valor_pago", "count"))
-        .reset_index()
-    )
+    # 💡 Agrupar pagos por documento (si hay fecha o no)
+    if "fecha_pago" in df_pagos.columns:
+        pagos_agg = (
+            df_pagos.groupby("documento", dropna=False)
+            .agg(total_pagado=("valor_pago", "sum"),
+                 cantidad_pagos=("valor_pago", "count"),
+                 fecha_ultimo_pago=("fecha_pago", "max"))
+            .reset_index()
+        )
+    else:
+        # Si no hay columna de fecha, se omite
+        pagos_agg = (
+            df_pagos.groupby("documento", dropna=False)
+            .agg(total_pagado=("valor_pago", "sum"),
+                 cantidad_pagos=("valor_pago", "count"))
+            .reset_index()
+        )
+        pagos_agg["fecha_ultimo_pago"] = None  # se rellena con nulos
+
     pagos_agg["tiene_pago"] = (pagos_agg["cantidad_pagos"] > 0).astype(int)
 
-    # 🔗 Cruce con base jurídica limpia
+    # 🔗 Cruce con base jurídica
     df = st.session_state["df_limpio"].copy()
     df["deudor"] = df["deudor"].astype(str)
     pagos_agg["documento"] = pagos_agg["documento"].astype(str)
+
     df_cruce_pagos = df.merge(pagos_agg, how="left", left_on="deudor", right_on="documento")
 
     st.session_state["df_cruce_pagos"] = df_cruce_pagos
     st.success("✅ Pagos integrados correctamente.")
     st.dataframe(df_cruce_pagos.head(10))
 else:
-    st.info("⬆️ Carga la base de pagos.")
-
+    st.info("⬆️ Carga la base de pagos para realizar el cruce.")
 # ============================================
 # 🤝 PASO 4 — CRUCE CON PROMESAS
 # ============================================
