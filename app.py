@@ -225,10 +225,8 @@ except Exception as e:
                 return "Media"
             else:
                 return "Baja"
-
-        df_modelo["segmento_recuperacion"] = df_modelo["probabilidad_pago"].apply(segmentar)
-
-        # ----------------------------
+                df_modelo["segmento_recuperacion"] = df_modelo["probabilidad_pago"].apply(segmentar)
+                # ----------------------------
         # Mostrar resultados y botón de descarga
         # ----------------------------
         st.success("✅ Score calculado correctamente")
