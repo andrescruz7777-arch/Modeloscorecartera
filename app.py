@@ -137,81 +137,98 @@ except Exception as e:
     st.write(df_final.info())
 
     # ==========================
-    # 🤖 MODELO DE SCORE
-    # ==========================
+# 🤖 MODELO DE SCORE
+# ==========================
 st.markdown("---")
 st.subheader("🧮 Cálculo de Probabilidad de Pago / Score de Recuperación")
 
+# Botón para ejecutar el modelo
 if st.button("Calcular probabilidad de pago para toda la base"):
     with st.spinner("Calculando, por favor espera..."):
+        # Copia base consolidada
         df_modelo = df_final.copy()
 
-# Variables derivadas
-def safe_days_diff(fecha):
-    try:
-        return (pd.Timestamp.today() - pd.to_datetime(fecha)).days
-    except:
-            return np.nan
+        # ----------------------------
+        # Variables derivadas
+        # ----------------------------
+        def safe_days_diff(fecha):
+            try:
+                return (pd.Timestamp.today() - pd.to_datetime(fecha)).days
+            except:
+                return np.nan
 
-            df_modelo["dias_desde_ultimo_pago"] = df_modelo["pagos_fecha_de_pago"].apply(safe_days_diff) if "pagos_fecha_de_pago" in df_modelo else 0
-            df_modelo["dias_desde_ultima_gestion"] = df_modelo["gestion_fecha_gestion"].apply(safe_days_diff) if "gestion_fecha_gestion" in df_modelo else 0
+        df_modelo["dias_desde_ultimo_pago"] = df_modelo["pagos_fecha_de_pago"].apply(safe_days_diff) if "pagos_fecha_de_pago" in df_modelo else 0
+        df_modelo["dias_desde_ultima_gestion"] = df_modelo["gestion_fecha_gestion"].apply(safe_days_diff) if "gestion_fecha_gestion" in df_modelo else 0
 
-            df_modelo["ratio_pago_saldo"] = pd.to_numeric(df_modelo.get("pagos_total_de_pago"), errors='coerce') / pd.to_numeric(df_modelo.get("asignaciones_saldo_act"), errors='coerce')
-            df_modelo["efectividad_promesas"] = pd.to_numeric(df_modelo.get("promesas_valor_de_pago"), errors='coerce') / pd.to_numeric(df_modelo.get("promesas_valor_acuerdo"), errors='coerce')
+        df_modelo["ratio_pago_saldo"] = pd.to_numeric(df_modelo.get("pagos_total_de_pago"), errors='coerce') / pd.to_numeric(df_modelo.get("asignaciones_saldo_act"), errors='coerce')
+        df_modelo["efectividad_promesas"] = pd.to_numeric(df_modelo.get("promesas_valor_de_pago"), errors='coerce') / pd.to_numeric(df_modelo.get("promesas_valor_acuerdo"), errors='coerce')
 
-            df_modelo = df_modelo.fillna(0)
+        df_modelo = df_modelo.fillna(0)
 
-            # Variables numéricas
-            features = [
-                "asignaciones_dias_mora_fin",
-                "asignaciones_capital_act",
-                "pagos_total_de_pago",
-                "promesas_valor_acuerdo",
-                "dias_desde_ultimo_pago",
-                "dias_desde_ultima_gestion",
-                "ratio_pago_saldo",
-                "efectividad_promesas"
-            ]
-            for f in features:
-                if f not in df_modelo.columns:
-                    df_modelo[f] = 0
-                df_modelo[f] = pd.to_numeric(df_modelo[f], errors='coerce')
+        # ----------------------------
+        # Variables numéricas del modelo
+        # ----------------------------
+        features = [
+            "asignaciones_dias_mora_fin",
+            "asignaciones_capital_act",
+            "pagos_total_de_pago",
+            "promesas_valor_acuerdo",
+            "dias_desde_ultimo_pago",
+            "dias_desde_ultima_gestion",
+            "ratio_pago_saldo",
+            "efectividad_promesas"
+        ]
+        for f in features:
+            if f not in df_modelo.columns:
+                df_modelo[f] = 0
+            df_modelo[f] = pd.to_numeric(df_modelo[f], errors='coerce')
 
-            X = df_modelo[features].fillna(0)
-            scaler = MinMaxScaler()
-            X_scaled = scaler.fit_transform(X)
+        X = df_modelo[features].fillna(0)
+        scaler = MinMaxScaler()
+        X_scaled = scaler.fit_transform(X)
 
-            # Modelo logístico base (sintético)
-            y = (X_scaled[:, 0]*-0.3 + X_scaled[:, 2]*0.6 + X_scaled[:, 3]*0.4 + X_scaled[:, 6]*0.5) > 0.5
-            y = y.astype(int)
-            model = LogisticRegression()
-            model.fit(X_scaled, y)
-            prob_pago = model.predict_proba(X_scaled)[:, 1]
+        # ----------------------------
+        # Modelo logístico (base)
+        # ----------------------------
+        y = (X_scaled[:, 0]*-0.3 + X_scaled[:, 2]*0.6 + X_scaled[:, 3]*0.4 + X_scaled[:, 6]*0.5) > 0.5
+        y = y.astype(int)
+        model = LogisticRegression()
+        model.fit(X_scaled, y)
+        prob_pago = model.predict_proba(X_scaled)[:, 1]
 
-            df_modelo["probabilidad_pago"] = np.round(prob_pago, 4)
-            df_modelo["score_recuperacion"] = np.round(df_modelo["probabilidad_pago"] * 100, 2)
+        df_modelo["probabilidad_pago"] = np.round(prob_pago, 4)
+        df_modelo["score_recuperacion"] = np.round(df_modelo["probabilidad_pago"] * 100, 2)
 
-            def segmentar(p):
-                if p >= 0.8: return "Alta"
-                elif p >= 0.6: return "Media"
-                else: return "Baja"
+        def segmentar(p):
+            if p >= 0.8:
+                return "Alta"
+            elif p >= 0.6:
+                return "Media"
+            else:
+                return "Baja"
 
-            df_modelo["segmento_recuperacion"] = df_modelo["probabilidad_pago"].apply(segmentar)
+        df_modelo["segmento_recuperacion"] = df_modelo["probabilidad_pago"].apply(segmentar)
 
-            st.success("✅ Score calculado correctamente")
-            st.dataframe(df_modelo[["deudor", "probabilidad_pago", "score_recuperacion", "segmento_recuperacion"]].head(20))
+        # ----------------------------
+        # Mostrar resultados y botón de descarga
+        # ----------------------------
+        st.success("✅ Score calculado correctamente")
+        st.dataframe(
+            df_modelo[["deudor", "probabilidad_pago", "score_recuperacion", "segmento_recuperacion"]].head(20),
+            use_container_width=True
+        )
 
-            # Descarga Excel
-            excel_buffer = io.BytesIO()
-            df_modelo.to_excel(excel_buffer, index=False)
-            excel_buffer.seek(0)
-            st.download_button(
-                label="⬇️ Descargar base completa con Score de Recuperación",
-                data=excel_buffer,
-                file_name="sudameris_score_recuperacion.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            )
+        # Descargar Excel con resultados
+        excel_buffer = io.BytesIO()
+        df_modelo.to_excel(excel_buffer, index=False)
+        excel_buffer.seek(0)
 
+        st.download_button(
+            label="⬇️ Descargar base completa con Score de Recuperación",
+            data=excel_buffer,
+            file_name="sudameris_score_recuperacion.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
     # ==============================
     # 🩺 DIAGNÓSTICO DE CRUCES
     # ==============================
