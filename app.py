@@ -35,7 +35,6 @@ def cargar_y_normalizar(archivo, prefijo):
             df.rename(columns={col: prefijo + "_deudor"}, inplace=True)
             break
     return df
-
 # ==========================
 # 📂 CARGA DE ARCHIVOS
 # ==========================
