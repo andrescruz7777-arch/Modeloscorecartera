@@ -216,9 +216,8 @@ except Exception as e:
     st.error(f"❌ Error al ajustar el modelo: {e}")
     st.info("Se asignará probabilidad base de 0.5 a todos los registros.")
     prob_pago = np.full(X_scaled.shape[0], 0.5)
-
-        df_modelo["probabilidad_pago"] = np.round(prob_pago, 4)
-        df_modelo["score_recuperacion"] = np.round(df_modelo["probabilidad_pago"] * 100, 2)
+    df_modelo["probabilidad_pago"] = np.round(prob_pago, 4)
+    df_modelo["score_recuperacion"] = np.round(df_modelo["probabilidad_pago"] * 100, 2)
 
         def segmentar(p):
             if p >= 0.8:
