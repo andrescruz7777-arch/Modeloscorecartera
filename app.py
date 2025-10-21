@@ -218,8 +218,7 @@ except Exception as e:
     prob_pago = np.full(X_scaled.shape[0], 0.5)
     df_modelo["probabilidad_pago"] = np.round(prob_pago, 4)
     df_modelo["score_recuperacion"] = np.round(df_modelo["probabilidad_pago"] * 100, 2)
-
-        def segmentar(p):
+    def segmentar(p):
             if p >= 0.8:
                 return "Alta"
             elif p >= 0.6:
