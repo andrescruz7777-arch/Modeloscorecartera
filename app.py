@@ -380,56 +380,37 @@ elif file_promesas:
 
 else:
     st.info("⬆️ Carga la base de promesas para realizar el cruce.")
-    
-    # ============================================
-# 📞 PASO 5 — CRUCE CON GESTIONES DE COBRO (VERSIÓN CORREGIDA FINAL)
-# ============================================
-st.title("📞 Paso 5 — Cruce con Gestiones de Cobro (mejor gestión vs última gestión)")
+    # =============================================
+# 📞 PASO 5 — CRUCE DE GESTIONES
+# =============================================
 
-# Subir archivo de gestiones
+st.title("📞 Paso 5 — Cruce de Gestiones (Contacto Solutions Jur)")
+
 file_gestion = st.file_uploader("📘 Cargar base de gestiones (gestion_sudameris.xlsx)", type=["xlsx"])
 
-if "df_cruce_promesas" not in st.session_state:
-    st.warning("⚠️ Primero completa los pasos anteriores (base jurídica + pagos + promesas).")
-
-elif file_gestion:
-    # Leer base
+if file_gestion and "df_limpio" in st.session_state:
     df_gest = pd.read_excel(file_gestion)
+    df = st.session_state["df_limpio"].copy()
 
-    st.subheader("🧾 Vista previa de la base de gestiones")
-    st.dataframe(df_gest.head())
+    # =========================
+    # 1️⃣ Normalizar nombres de columnas
+    # =========================
+    df_gest.columns = df_gest.columns.str.strip().str.lower()
+    df.columns = df.columns.str.strip().str.lower()
 
-    # ------------------------------
-    # 🔧 Normalizar nombres
-    # ------------------------------
-    df_gest.columns = (
-        df_gest.columns.str.strip()
-                       .str.lower()
-                       .str.replace(" ", "_")
-                       .str.replace("[^a-z0-9_]", "", regex=True)
-    )
+    # Mapear nombres importantes
+    col_id = next((c for c in df_gest.columns if "identific" in c.lower()), None)
+    col_mejor = next((c for c in df_gest.columns if "mejor" in c.lower()), None)
+    col_accion = next((c for c in df_gest.columns if "accion" in c.lower()), None)
+    col_resp = next((c for c in df_gest.columns if "respu" in c.lower()), None)
 
-    # Detectar columna de documento
-    col_doc = None
-    for col in df_gest.columns:
-        if "identific" in col.lower() or "document" in col.lower():
-            col_doc = col
-            break
+    if not col_id:
+        st.error("❌ No se encontró una columna con identificación del deudor en la base de gestiones.")
+        st.stop()
 
-    if col_doc is None:
-        st.error("❌ No se encontró columna de identificación del deudor en la base de gestiones.")
-    else:
-        df_gest = df_gest.rename(columns={col_doc: "documento"})
-
-    # Limpieza básica
-    df_gest["fecha"] = pd.to_datetime(df_gest.get("fecha"), errors="coerce")
-    df_gest["mejor_gestion"] = df_gest["mejor_gestion"].astype(str).str.upper().str.strip()
-    df_gest["accion"] = df_gest.get("accion", "")
-    df_gest["respuesta"] = df_gest.get("respuesta", "")
-
-    # ------------------------------
-    # 🧩 Asignar jerarquía de efectividad
-    # ------------------------------
+    # =========================
+    # 2️⃣ Jerarquía de MEJOR GESTION
+    # =========================
     jerarquia = {
         "1. GESTION EFECTIVA SOLUCIONA MORA": 1,
         "2. GESTION EFECTIVA SIN PAGO": 2,
@@ -437,103 +418,87 @@ elif file_gestion:
         "4. NO EFECTIVA MENSAJE MAQUINA": 4,
         "5. NO EFECTIVA CONTACTO CON TERCERO": 5,
         "6. NO EFECTIVA": 6,
-        "7. OPERATIVO": 7,
-        "CLIENTE": 8,
-        "CODEUDOR": 8,
-        "CONTACTO": 8,
-        "CONYUGE": 8,
-        "FAMILIAR": 8,
-        "MAQUINA": 8,
-        "OTRO": 8
+        "7. OPERATIVO": 7
     }
 
-    df_gest["nivel_gestion"] = df_gest["mejor_gestion"].map(jerarquia).fillna(9).astype(int)
+    if col_mejor:
+        df_gest["nivel_efectividad"] = df_gest[col_mejor].map(jerarquia)
+    else:
+        df_gest["nivel_efectividad"] = 99  # valor neutro si no existe
 
-    # ------------------------------
-    # 🧮 Agrupar información
-    # ------------------------------
-    # 1️⃣ Total de gestiones
-    cantidad_gestiones = df_gest.groupby("documento").size().reset_index(name="cantidad_gestiones")
-
-    # 2️⃣ Última gestión (por fecha)
-    ultima_gestion = (
-        df_gest.sort_values("fecha")
-        .groupby("documento", as_index=False)
-        .tail(1)[["documento", "fecha", "accion", "respuesta", "mejor_gestion"]]
-        .rename(columns={
-            "fecha": "fecha_ultima_gestion",
-            "accion": "accion_ultima",
-            "respuesta": "respuesta_ultima",
-            "mejor_gestion": "categoria_ultima_gestion"
-        })
+    # =========================
+    # 3️⃣ Seleccionar la mejor gestión por deudor
+    # =========================
+    df_mejor = (
+        df_gest.sort_values("nivel_efectividad", ascending=True)
+        .groupby(col_id, as_index=False)
+        .first()
     )
 
-    # 3️⃣ Mejor gestión (por jerarquía)
-    mejor_gest = (
-        df_gest.sort_values(["documento", "nivel_gestion", "fecha"], ascending=[True, True, False])
-        .groupby("documento", as_index=False)
-        .head(1)[["documento", "mejor_gestion", "accion", "respuesta", "fecha"]]
-        .rename(columns={
-            "mejor_gestion": "categoria_mejor_gestion",
-            "accion": "accion_mejor_gestion",
-            "respuesta": "respuesta_mejor_gestion",
-            "fecha": "fecha_mejor_gestion"
-        })
-    )
+    # =========================
+    # 4️⃣ Calcular cantidad de gestiones
+    # =========================
+    df_cant = df_gest.groupby(col_id, as_index=False).size().rename(columns={"size": "cantidad_gestiones"})
 
-    # 4️⃣ Consolidar resumen
-    resumen_gestiones = (
-        cantidad_gestiones
-        .merge(ultima_gestion, on="documento", how="left")
-        .merge(mejor_gest, on="documento", how="left")
-    )
+    # =========================
+    # 5️⃣ Unir cantidad + mejor gestión
+    # =========================
+    df_gest_final = pd.merge(df_mejor, df_cant, on=col_id, how="left")
 
-    resumen_gestiones["tiene_gestion"] = (resumen_gestiones["cantidad_gestiones"] > 0).astype(int)
+    # =========================
+    # 6️⃣ Determinar si tuvo gestión efectiva
+    # =========================
+    if col_mejor:
+        df_gest_final["tiene_gestion_efectiva"] = df_gest_final[col_mejor].astype(str).str.contains("EFECTIVA", case=False, na=False).astype(int)
+    else:
+        df_gest_final["tiene_gestion_efectiva"] = 0
 
-    # ------------------------------
-    # 🔗 Cruce con la base consolidada anterior
-    # ------------------------------
-    df_base = st.session_state["df_cruce_promesas"].copy()
-    df_base["deudor"] = df_base["deudor"].astype(str)
-    resumen_gestiones["documento"] = resumen_gestiones["documento"].astype(str)
+    # =========================
+    # 7️⃣ Seleccionar columnas útiles para el cruce
+    # =========================
+    cols_utiles = [col_id, "cantidad_gestiones", "tiene_gestion_efectiva"]
+    if col_mejor: cols_utiles.append(col_mejor)
+    if col_accion: cols_utiles.append(col_accion)
+    if col_resp: cols_utiles.append(col_resp)
 
-    df_cruce_gestiones = df_base.merge(
-        resumen_gestiones,
-        how="left",
+    df_gest_final = df_gest_final[cols_utiles]
+
+    # =========================
+    # 8️⃣ Cruce con la base limpia (df_limpio)
+    # =========================
+    df_cruce = pd.merge(
+        df,
+        df_gest_final,
         left_on="deudor",
-        right_on="documento"
+        right_on=col_id,
+        how="left"
     )
 
-    # Rellenar nulos
-    for col in ["tiene_gestion", "cantidad_gestiones"]:
-        df_cruce_gestiones[col] = df_cruce_gestiones[col].fillna(0).astype(int)
+    # =========================
+    # 9️⃣ Limpieza final post-cruce
+    # =========================
+    df_cruce["cantidad_gestiones"] = df_cruce["cantidad_gestiones"].fillna(0).astype(int)
+    df_cruce["tiene_gestion_efectiva"] = df_cruce["tiene_gestion_efectiva"].fillna(0).astype(int)
 
-    # ------------------------------
-    # 📊 Vista previa
-    # ------------------------------
-    st.success("✅ Cruce con gestiones realizado correctamente (mejor gestión y última gestión diferenciadas).")
-    st.write(f"Total de registros jurídicos: {len(df_base):,}")
-    st.write(f"Deudores con gestión registrada: {df_cruce_gestiones['tiene_gestion'].sum():,}")
+    # Renombrar columnas para consistencia
+    if col_mejor: df_cruce.rename(columns={col_mejor: "mejor_gestion"}, inplace=True)
+    if col_accion: df_cruce.rename(columns={col_accion: "accion"}, inplace=True)
+    if col_resp: df_cruce.rename(columns={col_resp: "respuesta"}, inplace=True)
 
-    st.subheader("📊 Vista previa del consolidado final (jurídico + pagos + promesas + gestiones)")
-    columnas_prev = [
-        "deudor", "tiene_pago", "cantidad_pagos", "total_pagado",
-        "tiene_promesa", "cantidad_promesas", "valor_ultima_promesa",
-        "estado_ultima_promesa", "recurso",
-        "tiene_gestion", "cantidad_gestiones",
-        "categoria_mejor_gestion", "accion_mejor_gestion", "respuesta_mejor_gestion", "fecha_mejor_gestion",
-        "categoria_ultima_gestion", "accion_ultima", "respuesta_ultima", "fecha_ultima_gestion"
-    ]
-    columnas_prev = [c for c in columnas_prev if c in df_cruce_gestiones.columns]
-    st.dataframe(df_cruce_gestiones[columnas_prev].head(30))
+    # =========================
+    # 🔄 Guardar en sesión
+    # =========================
+    st.session_state["df_limpio"] = df_cruce
 
-    # ------------------------------
-    # 💾 Guardar consolidado final
-    # ------------------------------
-    st.session_state["df_cruce_gestiones"] = df_cruce_gestiones
+    # =========================
+    # 🔍 Vista previa
+    # =========================
+    st.success("✅ Cruce de gestiones realizado con éxito.")
+    st.dataframe(df_cruce.head(10), use_container_width=True)
 
 else:
-    st.info("⬆️ Carga la base de gestiones para realizar el cruce.")
+    st.info("⬆️ Sube la base de gestiones y asegúrate de haber completado el cruce de promesas antes de este paso.")
+
    # =============================================
 # 📊 PASO 5A — ANÁLISIS EMPÍRICO DE EFECTIVIDAD
 # =============================================
