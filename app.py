@@ -195,60 +195,74 @@ else:
     import pandas as pd
 
 # ==============================
-# ⚙️ Diagnóstico de cruces Sudameris
+# 🩺 DIAGNÓSTICO DE CRUCES
 # ==============================
-
 st.markdown("---")
 st.subheader("🩺 Diagnóstico de cruces — Validación de Pagos, Promesas y Gestión")
 
-if st.button("Analizar calidad de cruces"):
+if st.button("🔍 Analizar calidad de cruces"):
     try:
-        df = pd.read_excel("sudameris_score_recuperacion.xlsx")
+        # Si el DataFrame del score ya existe, úsalo directamente
+        if 'df_modelo' in locals():
+            df = df_modelo.copy()
+        elif 'df_final' in locals():
+            df = df_final.copy()
+        else:
+            st.error("⚠️ No se ha generado aún el consolidado ni el score. Carga los archivos y ejecuta el modelo primero.")
+            st.stop()
 
         total_clientes = len(df)
-
-        # --- Identificar columnas ---
         pagos_cols = [c for c in df.columns if c.startswith("pagos_")]
         prom_cols = [c for c in df.columns if c.startswith("promesas_")]
         gest_cols = [c for c in df.columns if c.startswith("gestion_")]
-        asig_cols = [c for c in df.columns if c.startswith("asignaciones_")]
 
-        # --- Validación de pagos ---
-        pagos_validos = df["pagos_total_de_pago"].fillna(0)
-        clientes_con_pagos = (pagos_validos > 0).sum()
-        porc_pagos = (clientes_con_pagos / total_clientes) * 100
+        # Validación de pagos
+        col_pago = next((c for c in pagos_cols if "total" in c), None)
+        if col_pago:
+            pagos_validos = df[col_pago].fillna(0)
+            clientes_con_pagos = (pagos_validos > 0).sum()
+        else:
+            clientes_con_pagos = 0
+        porc_pagos = (clientes_con_pagos / total_clientes) * 100 if total_clientes > 0 else 0
 
-        # --- Validación de promesas ---
-        prom_validas = df["promesas_valor_acuerdo"].fillna(0)
-        clientes_con_promesas = (prom_validas > 0).sum()
-        porc_promesas = (clientes_con_promesas / total_clientes) * 100
+        # Validación de promesas
+        col_prom = next((c for c in prom_cols if "acuerdo" in c), None)
+        if col_prom:
+            prom_validas = df[col_prom].fillna(0)
+            clientes_con_promesas = (prom_validas > 0).sum()
+        else:
+            clientes_con_promesas = 0
+        porc_promesas = (clientes_con_promesas / total_clientes) * 100 if total_clientes > 0 else 0
 
-        # --- Validación de gestiones ---
-        gest_validas = df["gestion_fecha_gestion"].notna().sum()
-        porc_gestiones = (gest_validas / total_clientes) * 100
+        # Validación de gestiones
+        col_gest = next((c for c in gest_cols if "fecha" in c), None)
+        if col_gest:
+            gest_validas = df[col_gest].notna().sum()
+        else:
+            gest_validas = 0
+        porc_gestiones = (gest_validas / total_clientes) * 100 if total_clientes > 0 else 0
 
-        # --- Validación de identificadores ---
+        # Identificadores
         df["deudor_limpio"] = df["deudor"].astype(str).str.replace(r"[^0-9]", "", regex=True)
         df["long_id"] = df["deudor_limpio"].str.len()
         longitudes = df["long_id"].value_counts().head(5)
 
-        # --- Resultados ---
-        st.write("### 📊 Resultados de diagnóstico")
+        # Resultados
+        st.markdown("### 📊 Resultados del diagnóstico")
         st.write(f"- Total clientes analizados: **{total_clientes:,}**")
         st.write(f"- Clientes con pagos válidos: **{clientes_con_pagos:,}** → ({porc_pagos:.2f}%)")
         st.write(f"- Clientes con promesas válidas: **{clientes_con_promesas:,}** → ({porc_promesas:.2f}%)")
         st.write(f"- Clientes con gestiones registradas: **{gest_validas:,}** → ({porc_gestiones:.2f}%)")
 
-        st.write("### 🔎 Longitud de identificadores detectada")
-        st.write(longitudes)
+        st.markdown("### 🔎 Longitud de identificadores más común")
+        st.dataframe(longitudes)
 
-        # --- Interpretación automática ---
+        # Interpretación
         if porc_pagos < 5 or porc_promesas < 5:
-            st.warning("⚠️ Los cruces con pagos o promesas son muy bajos. Probablemente el campo `deudor` no coincidió por formato (espacios, puntos, ceros a la izquierda o distinto tipo).")
-            st.info("✅ Recomendación: antes de unir las bases, aplicar `astype(str).str.strip().str.replace(r'[^0-9]', '')` sobre las columnas de identificación en **todas** las bases.")
+            st.warning("⚠️ Los cruces con pagos o promesas son muy bajos. Es probable que el campo `deudor` tenga diferencias de formato (espacios, puntos o ceros a la izquierda).")
+            st.info("✅ Solución: normaliza el campo `deudor` en todas las bases antes de unirlas usando:\n`df['deudor'] = df['deudor'].astype(str).str.replace(r'[^0-9]', '').str.strip()`")
         else:
-            st.success("✅ Los cruces son correctos; la baja incidencia puede ser genuina por falta de gestión o promesas.")
+            st.success("✅ Los cruces son coherentes; la baja cobertura puede ser genuina por falta de gestión o promesas.")
 
     except Exception as e:
         st.error(f"❌ Error al analizar el archivo: {e}")
-
