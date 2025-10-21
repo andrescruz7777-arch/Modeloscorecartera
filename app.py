@@ -378,6 +378,7 @@ elif file_promesas:
 
 else:
     st.info("⬆️ Carga la base de promesas para realizar el cruce.")
+    
     # ============================================
 # 📞 PASO 5 — CRUCE CON GESTIONES DE COBRO (VERSIÓN CORREGIDA FINAL)
 # ============================================
@@ -535,8 +536,6 @@ else:
     # =============================================
 # 📊 PASO 5A — ANÁLISIS EMPÍRICO DE EFECTIVIDAD
 # =============================================
-import io
-import base64
 
 st.title("📊 Paso 5A — Análisis Empírico de Efectividad (Producto y Mora)")
 
