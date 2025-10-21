@@ -239,8 +239,7 @@ except Exception as e:
     excel_buffer = io.BytesIO()
     df_modelo.to_excel(excel_buffer, index=False)
     excel_buffer.seek(0)
-
-        st.download_button(
+    st.download_button(
             label="⬇️ Descargar base completa con Score de Recuperación",
             data=excel_buffer,
             file_name="sudameris_score_recuperacion.xlsx",
