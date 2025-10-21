@@ -446,13 +446,13 @@ if file_gestion and "df_limpio" in st.session_state:
     df_gest_final = pd.merge(df_mejor, df_cant, on=col_id, how="left")
 
     # =========================
-    # 6️⃣ Determinar si tuvo gestión efectiva
-    # =========================
-    if col_mejor:
-        df_gest_final["tiene_gestion_efectiva"] = df_gest_final[col_mejor].astype(str).str.contains("EFECTIVA", case=False, na=False).astype(int)
-    else:
-        df_gest_final["tiene_gestion_efectiva"] = 0
-
+# 6️⃣ Determinar si tuvo contacto real (gestión efectiva)
+# =========================
+if col_mejor:
+    df_gest_final["nivel_efectividad"] = df_gest_final["nivel_efectividad"].fillna(99).astype(int)
+    df_gest_final["tiene_gestion_efectiva"] = df_gest_final["nivel_efectividad"].apply(lambda x: 1 if x in [1, 2] else 0)
+else:
+    df_gest_final["tiene_gestion_efectiva"] = 0
     # =========================
     # 7️⃣ Seleccionar columnas útiles para el cruce
     # =========================
