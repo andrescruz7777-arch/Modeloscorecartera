@@ -81,25 +81,41 @@ elif file_pagos:
     df_pagos = pd.read_excel(file_pagos)
     df_pagos.columns = df_pagos.columns.str.lower().str.strip().str.replace(" ", "_")
 
-    # Detectar columnas clave
+    # 🔎 Detectar columnas clave automáticamente
     col_doc = next((c for c in df_pagos.columns if "document" in c or "identific" in c), None)
-    col_valor = next((c for c in df_pagos.columns if "total" in c or "valor" in c or "pago" in c), None)
-    col_fecha = next((c for c in df_pagos.columns if "fecha" in c), None)
+    col_valor = next(
+        (c for c in df_pagos.columns if "total_de_pago" in c or "total_pago" in c or "valor_pago" in c or "valor" in c or "monto" in c),
+        None
+    )
+    col_fecha = next((c for c in df_pagos.columns if "fecha" in c and "pago" in c), None)
 
-    df_pagos = df_pagos.rename(columns={col_doc: "documento", col_valor: "valor_pago", col_fecha: "fecha_pago"})
-    df_pagos["TOTAL DE PAGO"] = pd.to_numeric(df_pagos["TOTAL DE PAGO"], errors="coerce")
+    # 🚨 Validación de columnas
+    if not col_doc or not col_valor:
+        st.error(f"❌ No se encontraron columnas válidas en pagos. Columnas detectadas: {list(df_pagos.columns)}")
+        st.stop()
+
+    # 🧩 Renombrar columnas detectadas
+    rename_dict = {col_doc: "documento", col_valor: "valor_pago"}
+    if col_fecha:
+        rename_dict[col_fecha] = "fecha_pago"
+    df_pagos = df_pagos.rename(columns=rename_dict)
+
+    # 🧮 Conversión de tipos
+    df_pagos["valor_pago"] = pd.to_numeric(df_pagos["valor_pago"], errors="coerce")
     if "fecha_pago" in df_pagos.columns:
-        df_pagos["FECHA PAGO"] = pd.to_datetime(df_pagos["FECHA PAGO"], errors="coerce")
+        df_pagos["fecha_pago"] = pd.to_datetime(df_pagos["fecha_pago"], errors="coerce")
 
+    # 💡 Agrupar pagos por documento
     pagos_agg = (
-        df_pagos.groupby("documento")
-        .agg(total_pagado=("TOTAL DE PAGO", "sum"),
-             cantidad_pagos=("TOTAL DE PAGO", "count"),
-             fecha_ultimo_pago=("FECHA PAGO", "max"))
+        df_pagos.groupby("documento", dropna=False)
+        .agg(total_pagado=("valor_pago", "sum"),
+             cantidad_pagos=("valor_pago", "count"),
+             fecha_ultimo_pago=("fecha_pago", "max") if "fecha_pago" in df_pagos.columns else ("valor_pago", "count"))
         .reset_index()
     )
     pagos_agg["tiene_pago"] = (pagos_agg["cantidad_pagos"] > 0).astype(int)
 
+    # 🔗 Cruce con base jurídica limpia
     df = st.session_state["df_limpio"].copy()
     df["deudor"] = df["deudor"].astype(str)
     pagos_agg["documento"] = pagos_agg["documento"].astype(str)
