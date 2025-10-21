@@ -531,3 +531,82 @@ elif file_gestion:
 
 else:
     st.info("⬆️ Carga la base de gestiones para realizar el cruce.")
+    # =============================================
+# 📊 PASO 5A — ANÁLISIS EMPÍRICO DE EFECTIVIDAD
+# =============================================
+import io
+import base64
+
+st.title("📊 Paso 5A — Análisis Empírico de Efectividad (Producto y Mora)")
+
+if "df_limpio" not in st.session_state:
+    st.warning("⚠️ Primero completa los pasos anteriores (limpieza, pagos y promesas).")
+else:
+    df = st.session_state["df_limpio"].copy()
+
+    # =========================
+    # 1️⃣ Normalizar columnas clave
+    # =========================
+    df.columns = df.columns.str.strip().str.lower()
+    df.rename(columns={
+        "grupop": "grupop",
+        "ciclo_mora_act": "ciclo_mora_act",
+        "mejor_gestion": "mejor_gestion",
+        "capital_act": "capital_act",
+        "deudor": "deudor"
+    }, inplace=True)
+
+    # =========================
+    # 2️⃣ Indicadores binarios
+    # =========================
+    df["tiene_gestion_efectiva"] = df["mejor_gestion"].astype(str).str.contains("EFECTIVA|CONTACTO", case=False, na=False).astype(int)
+    if "tiene_promesa" not in df.columns:
+        df["tiene_promesa"] = 0
+    if "tiene_pago" not in df.columns:
+        df["tiene_pago"] = 0
+
+    # =========================
+    # 3️⃣ Agrupación por producto y mora
+    # =========================
+    agg = df.groupby(["grupop", "ciclo_mora_act"]).agg(
+        total_clientes=("deudor", "nunique"),
+        total_contacto=("tiene_gestion_efectiva", "sum"),
+        total_promesa=("tiene_promesa", "sum"),
+        total_pago=("tiene_pago", "sum")
+    ).reset_index()
+
+    # =========================
+    # 4️⃣ Cálculos de tasas
+    # =========================
+    agg["%_contacto"] = (agg["total_contacto"] / agg["total_clientes"] * 100).round(2)
+    agg["%_promesa"] = (agg["total_promesa"] / agg["total_clientes"] * 100).round(2)
+    agg["%_pago"] = (agg["total_pago"] / agg["total_clientes"] * 100).round(2)
+
+    agg = agg.sort_values(by="%_contacto", ascending=False)
+
+    # =========================
+    # 5️⃣ Visualización
+    # =========================
+    st.subheader("📈 Tasas de Efectividad por Producto y Ciclo de Mora")
+    st.dataframe(agg, use_container_width=True)
+
+    st.markdown("### 🔍 Interpretación")
+    st.markdown("""
+    - **% Contacto:** porcentaje de deudores con al menos una gestión efectiva o contacto real.  
+    - **% Promesa:** porcentaje de deudores que realizaron una promesa de pago.  
+    - **% Pago:** porcentaje de deudores que registraron al menos un pago.  
+    """)
+
+    # =========================
+    # 6️⃣ Exportar a Excel
+    # =========================
+    buffer = io.BytesIO()
+    with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
+        agg.to_excel(writer, index=False, sheet_name='Efectividad')
+    buffer.seek(0)
+    b64 = base64.b64encode(buffer.read()).decode()
+    href = f'<a href="data:application/octet-stream;base64,{b64}" download="Analisis_Efectividad_Cartera.xlsx">📥 Descargar análisis empírico en Excel</a>'
+    st.markdown(href, unsafe_allow_html=True)
+
+    st.success("✅ Análisis completado con éxito. Usa este resultado para calibrar los pesos reales del modelo.")
+
