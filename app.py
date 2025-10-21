@@ -14,7 +14,7 @@ if "df_limpio" not in st.session_state:
     st.session_state["df_limpio"] = None
 
 # ============================================
-# 📂 PASO 1 — CARGA DE DATOS
+# 📂 PASO 1: CARGA DE DATOS
 # ============================================
 st.title("📈 Paso 1 — Carga y Exploración de Datos (Enero a Septiembre)")
 
@@ -34,12 +34,12 @@ else:
 # ============================================
 # 🧩 PASO 2 — LIMPIEZA Y TRANSFORMACIÓN
 # ============================================
-st.title("🧩 Paso 2 — Limpieza y Transformación de Datos")
+st.title("🧩 Paso 2 — Limpieza y Transformación de Datos (Versión Final)")
 
 if st.session_state["df_unificado"] is not None:
     df = st.session_state["df_unificado"].copy()
 
-    # Estandarizar columnas
+    # Estandarizar nombres
     df.columns = (
         df.columns.str.strip()
         .str.lower()
@@ -47,14 +47,24 @@ if st.session_state["df_unificado"] is not None:
         .str.replace("[^a-z0-9_]", "", regex=True)
     )
 
-    # Función para limpiar texto
+    # Eliminar columna innecesaria
+    if "sand" in df.columns:
+        df = df.drop(columns=["sand"])
+
+    # Limpiar texto
     def limpiar_texto(texto):
-        if pd.isna(texto): return texto
+        if pd.isna(texto):
+            return texto
         try:
             texto = str(texto).encode("utf-8", "ignore").decode("utf-8", "ignore")
-            texto = (texto.replace("√ë","Ñ").replace("√±","ñ")
-                     .replace("√©","é").replace("√¡","á")
-                     .replace("√³","ó").replace("√º","ú"))
+            texto = (
+                texto.replace("√ë", "Ñ")
+                .replace("√±", "ñ")
+                .replace("√©", "é")
+                .replace("√¡", "á")
+                .replace("√³", "ó")
+                .replace("√º", "ú")
+            )
             return unicodedata.normalize("NFKD", texto).strip()
         except Exception:
             return str(texto)
@@ -64,80 +74,74 @@ if st.session_state["df_unificado"] is not None:
 
     st.session_state["df_limpio"] = df
     st.success("✅ Base jurídica limpia y lista.")
-    st.dataframe(df.head(10))
 else:
     st.warning("⚠️ Primero completa el Paso 1.")
 
 # ============================================
-# 💰 PASO 3 — CRUCE CON PAGOS (VERSIÓN BLINDADA)
+# 💰 PASO 3 — CRUCE CON PAGOS
 # ============================================
 st.title("💰 Paso 3 — Cruce de Base Jurídica con Pagos")
 
 file_pagos = st.file_uploader("📘 Cargar base de pagos (pagos_sudameris.xlsx)", type=["xlsx"])
 
 if "df_limpio" not in st.session_state:
-    st.warning("⚠️ Primero completa los pasos anteriores.")
+    st.warning("⚠️ Primero completa los pasos anteriores (base jurídica limpia).")
 elif file_pagos:
     df_pagos = pd.read_excel(file_pagos)
-    df_pagos.columns = df_pagos.columns.str.lower().str.strip().str.replace(" ", "_")
-
-    # 🔍 Detectar columnas clave
-    col_doc = next((c for c in df_pagos.columns if "document" in c or "identific" in c), None)
-    col_valor = next(
-        (c for c in df_pagos.columns if "total_de_pago" in c or "valor_pago" in c or "valor" in c or "monto" in c),
-        None
+    df_pagos.columns = (
+        df_pagos.columns.str.strip()
+        .str.lower()
+        .str.replace(" ", "_")
+        .str.replace("[^a-z0-9_]", "", regex=True)
     )
-    col_fecha = next((c for c in df_pagos.columns if "fecha" in c and "pago" in c), None)
 
-    # 🚨 Validar detección
-    if not col_doc or not col_valor:
-        st.error(f"❌ No se encontraron columnas válidas en la base de pagos. Columnas detectadas: {list(df_pagos.columns)}")
-        st.stop()
+    # Renombrar columnas principales
+    df_pagos = df_pagos.rename(columns={
+        "total_de_pago": "valor_pago",
+        "fecha_pago": "fecha_pago",
+        "documento": "documento"
+    })
 
-    # 🧩 Renombrar columnas detectadas
-    rename_dict = {col_doc: "documento", col_valor: "valor_pago"}
-    if col_fecha:
-        rename_dict[col_fecha] = "fecha_pago"
-    df_pagos = df_pagos.rename(columns=rename_dict)
-
-    # 🧮 Conversión de tipos
-    df_pagos["valor_pago"] = pd.to_numeric(df_pagos["valor_pago"], errors="coerce")
+    # Convertir tipos
+    if "valor_pago" in df_pagos.columns:
+        df_pagos["valor_pago"] = pd.to_numeric(df_pagos["valor_pago"], errors="coerce")
     if "fecha_pago" in df_pagos.columns:
         df_pagos["fecha_pago"] = pd.to_datetime(df_pagos["fecha_pago"], errors="coerce")
 
-    # 💡 Agrupar pagos por documento (si hay fecha o no)
-    if "fecha_pago" in df_pagos.columns:
-        pagos_agg = (
-            df_pagos.groupby("documento", dropna=False)
-            .agg(total_pagado=("valor_pago", "sum"),
-                 cantidad_pagos=("valor_pago", "count"),
-                 fecha_ultimo_pago=("fecha_pago", "max"))
-            .reset_index()
-        )
-    else:
-        # Si no hay columna de fecha, se omite
-        pagos_agg = (
-            df_pagos.groupby("documento", dropna=False)
-            .agg(total_pagado=("valor_pago", "sum"),
-                 cantidad_pagos=("valor_pago", "count"))
-            .reset_index()
-        )
-        pagos_agg["fecha_ultimo_pago"] = None  # se rellena con nulos
+    # Agrupar pagos
+    resumen_pagos = (
+        df_pagos.groupby("documento", dropna=False)
+        .agg({
+            "valor_pago": ["sum", "count"],
+            "fecha_pago": "max"
+        })
+    )
+    resumen_pagos.columns = ["total_pagado", "cantidad_pagos", "fecha_ultimo_pago"]
+    resumen_pagos = resumen_pagos.reset_index()
+    resumen_pagos["tiene_pago"] = (resumen_pagos["cantidad_pagos"] > 0).astype(int)
 
-    pagos_agg["tiene_pago"] = (pagos_agg["cantidad_pagos"] > 0).astype(int)
+    df_jur = st.session_state["df_limpio"].copy()
+    df_jur["deudor"] = df_jur["deudor"].astype(str)
+    resumen_pagos["documento"] = resumen_pagos["documento"].astype(str)
 
-    # 🔗 Cruce con base jurídica
-    df = st.session_state["df_limpio"].copy()
-    df["deudor"] = df["deudor"].astype(str)
-    pagos_agg["documento"] = pagos_agg["documento"].astype(str)
+    df_cruce = df_jur.merge(
+        resumen_pagos,
+        how="left",
+        left_on="deudor",
+        right_on="documento"
+    )
 
-    df_cruce_pagos = df.merge(pagos_agg, how="left", left_on="deudor", right_on="documento")
+    for col in ["tiene_pago", "total_pagado", "cantidad_pagos"]:
+        if col in df_cruce.columns:
+            df_cruce[col] = df_cruce[col].fillna(0)
+            if col == "tiene_pago":
+                df_cruce[col] = df_cruce[col].astype(int)
 
-    st.session_state["df_cruce_pagos"] = df_cruce_pagos
-    st.success("✅ Pagos integrados correctamente.")
-    st.dataframe(df_cruce_pagos.head(10))
+    st.session_state["df_cruce_pagos"] = df_cruce
+    st.success("✅ Cruce realizado correctamente.")
 else:
-    st.info("⬆️ Carga la base de pagos para realizar el cruce.")
+    st.info("⬆️ Carga la base de pagos para continuar.")
+
 # ============================================
 # 🤝 PASO 4 — CRUCE CON PROMESAS
 # ============================================
@@ -149,36 +153,61 @@ if "df_cruce_pagos" not in st.session_state:
     st.warning("⚠️ Primero completa los pasos anteriores.")
 elif file_promesas:
     df_prom = pd.read_excel(file_promesas)
-    df_prom.columns = df_prom.columns.str.lower().str.strip().str.replace(" ", "_")
+    df_prom.columns = (
+        df_prom.columns.str.strip()
+        .str.lower()
+        .str.replace(" ", "_")
+        .str.replace("[^a-z0-9_]", "", regex=True)
+    )
 
     col_doc = next((c for c in df_prom.columns if "identific" in c or "document" in c), None)
     df_prom = df_prom.rename(columns={col_doc: "documento"})
-    df_prom["valor_cuota_prometida"] = pd.to_numeric(df_prom.get("valor_cuota_prometida", 0), errors="coerce")
-    df_prom["fecha_de_pago_prometida"] = pd.to_datetime(df_prom.get("fecha_de_pago_prometida"), errors="coerce")
 
-    prom_agg = (
-        df_prom.groupby("documento")
-        .agg(cantidad_promesas=("valor_cuota_prometida", "count"),
-             valor_prometido=("valor_cuota_prometida", "sum"),
-             fecha_ultima_promesa=("fecha_de_pago_prometida", "max"))
-        .reset_index()
+    df_prom = df_prom.rename(columns={
+        "valor_acuerdo": "valor_prometido",
+        "valor_cuota_prometida": "valor_cuota_prometida",
+        "fecha_de_pago_prometida": "fecha_promesa",
+        "estado_final": "estado_promesa"
+    })
+
+    df_prom["valor_prometido"] = pd.to_numeric(df_prom.get("valor_prometido", 0), errors="coerce").fillna(0)
+    df_prom["valor_cuota_prometida"] = pd.to_numeric(df_prom.get("valor_cuota_prometida", 0), errors="coerce").fillna(0)
+    df_prom["fecha_promesa"] = pd.to_datetime(df_prom.get("fecha_promesa"), errors="coerce")
+
+    cantidad_promesas = df_prom.groupby("documento").size().reset_index(name="cantidad_promesas")
+    ultima_promesa = (
+        df_prom.sort_values("fecha_promesa")
+        .groupby("documento", as_index=False)
+        .tail(1)
+        [["documento", "fecha_promesa", "valor_cuota_prometida", "estado_promesa", "recurso"]]
     )
-    prom_agg["tiene_promesa"] = (prom_agg["cantidad_promesas"] > 0).astype(int)
 
-    df = st.session_state["df_cruce_pagos"].copy()
-    df["deudor"] = df["deudor"].astype(str)
-    prom_agg["documento"] = prom_agg["documento"].astype(str)
+    resumen_promesas = ultima_promesa.merge(cantidad_promesas, on="documento", how="left")
+    resumen_promesas = resumen_promesas.rename(columns={
+        "valor_cuota_prometida": "valor_ultima_promesa",
+        "fecha_promesa": "fecha_ultima_promesa",
+        "estado_promesa": "estado_ultima_promesa"
+    })
+    resumen_promesas["tiene_promesa"] = (resumen_promesas["cantidad_promesas"] > 0).astype(int)
 
-    df_cruce_promesas = df.merge(prom_agg, how="left", left_on="deudor", right_on="documento")
+    df_base = st.session_state["df_cruce_pagos"].copy()
+    df_cruce_promesas = df_base.merge(
+        resumen_promesas,
+        how="left",
+        left_on="deudor",
+        right_on="documento"
+    )
+
+    for col in ["tiene_promesa", "valor_ultima_promesa", "cantidad_promesas"]:
+        df_cruce_promesas[col] = df_cruce_promesas[col].fillna(0)
+
     st.session_state["df_cruce_promesas"] = df_cruce_promesas
-
-    st.success("✅ Promesas integradas correctamente.")
-    st.dataframe(df_cruce_promesas.head(10))
+    st.success("✅ Cruce con promesas realizado correctamente.")
 else:
     st.info("⬆️ Carga la base de promesas.")
 
 # ============================================
-# 📞 PASO 5 — CRUCE DE GESTIONES + DESCARGA FINAL
+# 📞 PASO 5 — GESTIONES Y DESCARGA FINAL
 # ============================================
 st.title("📞 Paso 5 — Cruce de Gestiones y Consolidado Final")
 
@@ -224,6 +253,5 @@ if file_gestion and "df_cruce_promesas" in st.session_state:
     b64 = base64.b64encode(buffer.read()).decode()
     href = f'<a href="data:application/octet-stream;base64,{b64}" download="Base_Consolidada_Final.xlsx">📥 Descargar Base Consolidada Final</a>'
     st.markdown(href, unsafe_allow_html=True)
-
 else:
     st.info("⬆️ Carga la base de gestiones después de los pasos previos.")
