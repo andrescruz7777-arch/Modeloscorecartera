@@ -236,7 +236,7 @@ elif file_pagos:
 else:
     st.info("⬆️ Carga la base de pagos para realizar el cruce.")
     # ============================================
-# 🤝 PASO 4 — CRUCE CON PROMESAS DE PAGO (VERSIÓN FINAL ROBUSTA)
+# 🤝 PASO 4 — CRUCE CON PROMESAS DE PAGO (ULTIMA PROMESA REAL)
 # ============================================
 st.title("🤝 Paso 4 — Cruce de Base Jurídica + Pagos con Promesas de Pago")
 
@@ -263,9 +263,7 @@ elif file_promesas:
                        .str.replace("[^a-z0-9_]", "", regex=True)
     )
 
-    # ------------------------------
-    # 🧩 Detección automática de la columna de documento
-    # ------------------------------
+    # Detectar columna de documento
     col_doc = None
     for col in df_prom.columns:
         if "identific" in col.lower() or "document" in col.lower():
@@ -277,66 +275,62 @@ elif file_promesas:
     else:
         df_prom = df_prom.rename(columns={col_doc: "documento"})
 
-    # Renombrar otras columnas clave
+    # Renombrar columnas relevantes
     df_prom = df_prom.rename(columns={
         "valor_acuerdo": "valor_prometido",
+        "valor_cuota_prometida": "valor_cuota_prometida",
         "fecha_de_pago_prometida": "fecha_promesa",
         "estado_final": "estado_promesa"
     })
 
     # Convertir tipos
-    if "valor_prometido" in df_prom.columns:
-        df_prom["valor_prometido"] = pd.to_numeric(df_prom["valor_prometido"], errors="coerce").fillna(0)
-    if "fecha_promesa" in df_prom.columns:
-        df_prom["fecha_promesa"] = pd.to_datetime(df_prom["fecha_promesa"], errors="coerce")
+    df_prom["valor_prometido"] = pd.to_numeric(df_prom.get("valor_prometido", 0), errors="coerce").fillna(0)
+    df_prom["valor_cuota_prometida"] = pd.to_numeric(df_prom.get("valor_cuota_prometida", 0), errors="coerce").fillna(0)
+    df_prom["fecha_promesa"] = pd.to_datetime(df_prom.get("fecha_promesa"), errors="coerce")
 
     # ------------------------------
-    # 🧮 Agrupar promesas por documento
+    # 🧮 Determinar la última promesa real por deudor
     # ------------------------------
-    if "documento" in df_prom.columns:
-        resumen_promesas = (
-            df_prom.groupby("documento", dropna=False)
-            .agg({
-                "valor_prometido": "sum",
-                "fecha_promesa": "max",
-                "estado_promesa": "last",
-                "recurso": "last"
-            })
-            .reset_index()
-        )
+    df_prom = df_prom.sort_values(["documento", "fecha_promesa"], ascending=[True, True])
 
-        # Calcular cantidad de promesas (conteo real de filas)
-        cantidad_promesas = (
-            df_prom.groupby("documento", dropna=False)
-            .size()
-            .reset_index(name="cantidad_promesas")
-        )
+    # Calcular cantidad total de promesas
+    cantidad_promesas = df_prom.groupby("documento").size().reset_index(name="cantidad_promesas")
 
-        # Unir conteo al resumen
-        resumen_promesas = resumen_promesas.merge(cantidad_promesas, on="documento", how="left")
+    # Tomar solo la última promesa (por fecha máxima)
+    ultima_promesa = (
+        df_prom.sort_values("fecha_promesa")
+        .groupby("documento", as_index=False)
+        .tail(1)
+        [["documento", "fecha_promesa", "valor_cuota_prometida", "estado_promesa", "recurso"]]
+    )
 
-        # Normalizar RECURSO
-        if "recurso" in resumen_promesas.columns:
-            resumen_promesas["recurso"] = (
-                resumen_promesas["recurso"]
-                .astype(str)
-                .str.upper()
-                .str.strip()
-                .replace({
-                    "NAN": None,
-                    "": None,
-                    "COMPRA": "COMPRA_CARTERA",
-                    "COMPRA CARTERA": "COMPRA_CARTERA",
-                    "PROPIO": "PROPIO"
-                })
-            )
+    # Unir ambas: cantidad total + última promesa
+    resumen_promesas = ultima_promesa.merge(cantidad_promesas, on="documento", how="left")
 
-        resumen_promesas["tiene_promesa"] = (resumen_promesas["cantidad_promesas"] > 0).astype(int)
-    else:
-        resumen_promesas = pd.DataFrame(columns=[
-            "documento", "valor_prometido", "fecha_promesa",
-            "estado_promesa", "recurso", "cantidad_promesas", "tiene_promesa"
-        ])
+    # Renombrar para claridad
+    resumen_promesas = resumen_promesas.rename(columns={
+        "valor_cuota_prometida": "valor_ultima_promesa",
+        "fecha_promesa": "fecha_ultima_promesa",
+        "estado_promesa": "estado_ultima_promesa"
+    })
+
+    # Normalizar RECURSO
+    resumen_promesas["recurso"] = (
+        resumen_promesas["recurso"]
+        .astype(str)
+        .str.upper()
+        .str.strip()
+        .replace({
+            "NAN": None,
+            "": None,
+            "COMPRA": "COMPRA_CARTERA",
+            "COMPRA CARTERA": "COMPRA_CARTERA",
+            "COMPRA DE CARTERA": "COMPRA_CARTERA",
+            "PROPIO": "PROPIO"
+        })
+    )
+
+    resumen_promesas["tiene_promesa"] = (resumen_promesas["cantidad_promesas"] > 0).astype(int)
 
     # ------------------------------
     # 🔗 Cruce con la base jurídica + pagos
@@ -353,26 +347,26 @@ elif file_promesas:
     )
 
     # Rellenar valores nulos
-    for col in ["tiene_promesa", "valor_prometido", "cantidad_promesas"]:
+    for col in ["tiene_promesa", "valor_ultima_promesa", "cantidad_promesas"]:
         if col in df_cruce_promesas.columns:
             df_cruce_promesas[col] = df_cruce_promesas[col].fillna(0)
             if col in ["tiene_promesa", "cantidad_promesas"]:
                 df_cruce_promesas[col] = df_cruce_promesas[col].astype(int)
 
-    df_cruce_promesas["recurso"] = df_cruce_promesas.get("recurso", "SIN_DATOS").fillna("SIN_DATOS")
+    df_cruce_promesas["recurso"] = df_cruce_promesas["recurso"].fillna("SIN_DATOS")
 
     # ------------------------------
     # 📊 Resumen y vista previa
     # ------------------------------
-    st.success("✅ Cruce con promesas realizado correctamente.")
+    st.success("✅ Cruce con promesas realizado correctamente (última promesa real por deudor).")
     st.write(f"Total de registros jurídicos: {len(df_base):,}")
     st.write(f"Deudores con promesa registrada: {df_cruce_promesas['tiene_promesa'].sum():,}")
 
     st.subheader("📊 Vista previa del consolidado jurídico + pagos + promesas")
     columnas_prev = [
         "deudor", "tiene_pago", "cantidad_pagos", "total_pagado", "fecha_ultimo_pago",
-        "tiene_promesa", "cantidad_promesas", "valor_prometido",
-        "fecha_promesa", "estado_promesa", "recurso"
+        "tiene_promesa", "cantidad_promesas", "valor_ultima_promesa",
+        "fecha_ultima_promesa", "estado_ultima_promesa", "recurso"
     ]
     columnas_prev = [c for c in columnas_prev if c in df_cruce_promesas.columns]
     st.dataframe(df_cruce_promesas[columnas_prev].head(20))
