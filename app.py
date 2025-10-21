@@ -120,8 +120,8 @@ st.dataframe(df_final.head(10), use_container_width=True)
     # ==========================
     # 🤖 MODELO DE SCORE
     # ==========================
-    st.markdown("---")
-    st.subheader("🧮 Cálculo de Probabilidad de Pago / Score de Recuperación")
+st.markdown("---")
+st.subheader("🧮 Cálculo de Probabilidad de Pago / Score de Recuperación")
 
     if st.button("Calcular probabilidad de pago para toda la base"):
         with st.spinner("Calculando, por favor espera..."):
