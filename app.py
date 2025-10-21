@@ -99,7 +99,7 @@ else:
     def limpiar_texto(texto):
         if pd.isna(texto):
             return texto
-        try:
+try:
             texto = str(texto).encode("utf-8", "ignore").decode("utf-8", "ignore")
             texto = (
                     texto.replace("√ë", "Ñ")
@@ -112,9 +112,8 @@ else:
         # Normaliza caracteres Unicode y elimina espacios raros
         texto = unicodedata.normalize("NFKD", texto)
         return texto.strip()
-    except Exception:
+except Exception:
         return str(texto)
-
     # ------------------------------
     # 5️⃣ Validar tipos de datos básicos
     # ------------------------------
