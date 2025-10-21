@@ -235,3 +235,19 @@ elif file_pagos:
 
 else:
     st.info("⬆️ Carga la base de pagos para realizar el cruce.")
+    # ============================================
+# 🧾 VISTA RÁPIDA DE BASE DE PROMESAS
+# ============================================
+st.title("🧾 Vista previa de la Base de Promesas de Pago")
+
+file_promesas = st.file_uploader("📗 Cargar base de promesas (promesas_sudameris.xlsx)", type=["xlsx"])
+
+if file_promesas:
+    df_promesas = pd.read_excel(file_promesas)
+    st.subheader("📋 Columnas detectadas en la base de promesas:")
+    st.write(list(df_promesas.columns))
+    st.subheader("👀 Vista previa:")
+    st.dataframe(df_promesas.head(10))
+else:
+    st.info("⬆️ Sube la base de promesas para analizar su estructura.")
+
