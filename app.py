@@ -87,15 +87,15 @@ elif file_pagos:
     col_fecha = next((c for c in df_pagos.columns if "fecha" in c), None)
 
     df_pagos = df_pagos.rename(columns={col_doc: "documento", col_valor: "valor_pago", col_fecha: "fecha_pago"})
-    df_pagos["valor_pago"] = pd.to_numeric(df_pagos["valor_pago"], errors="coerce")
+    df_pagos["TOTAL DE PAGO"] = pd.to_numeric(df_pagos["TOTAL DE PAGO"], errors="coerce")
     if "fecha_pago" in df_pagos.columns:
-        df_pagos["fecha_pago"] = pd.to_datetime(df_pagos["fecha_pago"], errors="coerce")
+        df_pagos["FECHA PAGO"] = pd.to_datetime(df_pagos["FECHA PAGO"], errors="coerce")
 
     pagos_agg = (
         df_pagos.groupby("documento")
-        .agg(total_pagado=("valor_pago", "sum"),
-             cantidad_pagos=("valor_pago", "count"),
-             fecha_ultimo_pago=("fecha_pago", "max"))
+        .agg(total_pagado=("TOTAL DE PAGO", "sum"),
+             cantidad_pagos=("TOTAL DE PAGO", "count"),
+             fecha_ultimo_pago=("FECHA PAGO", "max"))
         .reset_index()
     )
     pagos_agg["tiene_pago"] = (pagos_agg["cantidad_pagos"] > 0).astype(int)
