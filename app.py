@@ -378,6 +378,7 @@ elif file_promesas:
 
 else:
     st.info("⬆️ Carga la base de promesas para realizar el cruce.")
+    
     # ============================================
 # 📞 PASO 5 — CRUCE CON GESTIONES DE COBRO (VERSIÓN FINAL AJUSTADA)
 # ============================================
