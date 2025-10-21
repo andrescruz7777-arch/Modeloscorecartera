@@ -263,12 +263,27 @@ elif file_promesas:
                        .str.replace("[^a-z0-9_]", "", regex=True)
     )
 
-    # Renombrar columnas clave
-    df_prom = df_prom.rename(columns={
-        "deudor_identificación": "documento",
-        "valor_acuerdo": "valor_prometido",
-        "fecha_de_pago_prometida": "fecha_promesa",
-        "estado_final": "estado_promesa"
+    # ------------------------------
+# 🧩 Detección automática de la columna de documento
+# ------------------------------
+col_doc = None
+for col in df_prom.columns:
+    if "identific" in col.lower() or "document" in col.lower():
+        col_doc = col
+        break
+
+if col_doc is None:
+    st.error("❌ No se encontró columna de identificación del deudor en la base de promesas.")
+else:
+    df_prom = df_prom.rename(columns={col_doc: "documento"})
+
+# Renombrar columnas clave restantes
+df_prom = df_prom.rename(columns={
+    "valor_acuerdo": "valor_prometido",
+    "fecha_de_pago_prometida": "fecha_promesa",
+    "estado_final": "estado_promesa"
+})
+
     })
 
     # Convertir tipos
