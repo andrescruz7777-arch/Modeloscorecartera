@@ -2,6 +2,8 @@ import streamlit as st
 import pandas as pd
 import matplotlib.pyplot as plt
 import unicodedata
+import io
+import base64
 
 # ============================================
 # 🔒 CONTROL DE FLUJO ENTRE PASOS
