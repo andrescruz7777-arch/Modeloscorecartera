@@ -118,5 +118,50 @@ else:
 
     # Guardar DataFrame limpio para el siguiente paso
     st.session_state["df_limpio"] = df
+    import streamlit as st
+
+st.title("📘 Vista de la Base Consolidada (Enero a Septiembre)")
+
+if "df_limpio" not in st.session_state:
+    st.warning("⚠️ Primero completa el Paso 2 (Limpieza y Transformación).")
+else:
+    df = st.session_state["df_limpio"]
+
+    # =============================
+    # 🔍 EXPLORADOR INTERACTIVO
+    # =============================
+    st.markdown("### 🔎 Visualiza y filtra la base completa")
+
+    # Selector de columnas
+    columnas_mostrar = st.multiselect(
+        "Selecciona columnas a visualizar:",
+        options=list(df.columns),
+        default=list(df.columns)[:10]
+    )
+
+    # Muestra el DataFrame
+    st.dataframe(df[columnas_mostrar].head(50), use_container_width=True)
+
+    # =============================
+    # 📏 RESUMEN GENERAL
+    # =============================
+    st.markdown("### 📊 Información general del DataFrame")
+    st.write(f"Filas totales: **{df.shape[0]:,}**")
+    st.write(f"Columnas totales: **{df.shape[1]:,}**")
+
+    st.markdown("### 📈 Resumen estadístico (variables numéricas)")
+    st.dataframe(df.describe())
+
+    # =============================
+    # 💾 DESCARGA OPCIONAL
+    # =============================
+    csv = df.to_csv(index=False).encode("utf-8")
+    st.download_button(
+        label="💾 Descargar base consolidada (CSV)",
+        data=csv,
+        file_name="base_unificada_limpia.csv",
+        mime="text/csv"
+    )
+
 
 
