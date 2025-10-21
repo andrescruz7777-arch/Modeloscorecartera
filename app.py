@@ -49,7 +49,7 @@ if file_ene_mar and file_abr_sep:
 else:
     st.info("⬆️ Sube ambos archivos para iniciar la exploración.")
      # ------------------------------
-    # 1️⃣ Estandarizar nombres de columnas
+    #🧩 Paso 2 — Limpieza y Transformación de Datos
     # ------------------------------
 st.title("🧩 Paso 2 — Limpieza y Transformación de Datos")
 
