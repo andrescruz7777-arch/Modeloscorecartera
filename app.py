@@ -446,13 +446,14 @@ if file_gestion and "df_limpio" in st.session_state:
     df_gest_final = pd.merge(df_mejor, df_cant, on=col_id, how="left")
 
     # =========================
-# 6️⃣ Determinar si tuvo contacto real (gestión efectiva)
-# =========================
-if col_mejor:
-    df_gest_final["nivel_efectividad"] = df_gest_final["nivel_efectividad"].fillna(99).astype(int)
-    df_gest_final["tiene_gestion_efectiva"] = df_gest_final["nivel_efectividad"].apply(lambda x: 1 if x in [1, 2] else 0)
-else:
-    df_gest_final["tiene_gestion_efectiva"] = 0
+    # 6️⃣ Determinar si tuvo contacto real (gestión efectiva)
+    # =========================
+    if col_mejor:
+        df_gest_final["nivel_efectividad"] = df_gest_final["nivel_efectividad"].fillna(99).astype(int)
+        df_gest_final["tiene_gestion_efectiva"] = df_gest_final["nivel_efectividad"].apply(lambda x: 1 if x in [1, 2] else 0)
+    else:
+        df_gest_final["tiene_gestion_efectiva"] = 0
+
     # =========================
     # 7️⃣ Seleccionar columnas útiles para el cruce
     # =========================
@@ -464,7 +465,13 @@ else:
     df_gest_final = df_gest_final[cols_utiles]
 
     # =========================
-    # 8️⃣ Cruce con la base limpia (df_limpio)
+    # 8️⃣ Normalizar columnas de unión (identificación)
+    # =========================
+    df["deudor"] = df["deudor"].astype(str).str.strip().str.replace(r"\.0$", "", regex=True)
+    df_gest_final[col_id] = df_gest_final[col_id].astype(str).str.strip().str.replace(r"\.0$", "", regex=True)
+
+    # =========================
+    # 9️⃣ Cruce con la base limpia (df_limpio)
     # =========================
     df_cruce = pd.merge(
         df,
@@ -475,7 +482,7 @@ else:
     )
 
     # =========================
-    # 9️⃣ Limpieza final post-cruce
+    # 🔟 Limpieza final post-cruce
     # =========================
     df_cruce["cantidad_gestiones"] = df_cruce["cantidad_gestiones"].fillna(0).astype(int)
     df_cruce["tiene_gestion_efectiva"] = df_cruce["tiene_gestion_efectiva"].fillna(0).astype(int)
@@ -491,12 +498,19 @@ else:
     st.session_state["df_limpio"] = df_cruce
 
     # =========================
-    # 🔍 Vista previa
+    # 🔍 Vista previa y resumen
     # =========================
-    st.success("✅ Cruce de gestiones realizado con éxito.")
+    total_contactos = int(df_cruce["tiene_gestion_efectiva"].sum())
+    total_clientes = df_cruce["deudor"].nunique()
+
+    st.success(f"✅ Cruce de gestiones realizado con éxito.")
+    st.info(f"📞 Contactos efectivos: {total_contactos:,} de {total_clientes:,} clientes ({(total_contactos/total_clientes*100 if total_clientes>0 else 0):.2f}%)")
+
     st.dataframe(df_cruce.head(10), use_container_width=True)
+
 else:
     st.info("⬆️ Sube la base de gestiones y asegúrate de haber completado el cruce de promesas antes de este paso.")
+
 
    # =============================================
 # 📊 PASO 5A — ANÁLISIS EMPÍRICO DE EFECTIVIDAD
