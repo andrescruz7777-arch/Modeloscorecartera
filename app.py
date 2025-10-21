@@ -114,16 +114,19 @@ df_final = asignaciones.merge(prom_grouped, on="deudor", how="left")
 df_final = df_final.merge(pagos_grouped, on="deudor", how="left")
 df_final = df_final.merge(gest_grouped, on="deudor", how="left")
 
+# ==========================
+# 📋 VISTA PREVIA DEL CONSOLIDADO
+# ==========================
 st.subheader("📋 Vista previa del consolidado (primeros 10 clientes)")
-# Limpieza previa para evitar errores de visualización
-df_preview = df_final.head(10).copy()
-for col in df_preview.columns:
-    try:
-        df_preview[col] = df_preview[col].astype(str)
-    except Exception:
-        df_preview[col] = df_preview[col].apply(lambda x: str(x) if not isinstance(x, str) else x)
 
-st.dataframe(df_preview, use_container_width=True)
+try:
+    # Convertir todo el DataFrame a texto seguro
+    df_preview = df_final.head(10).astype(str)
+    st.dataframe(df_preview, use_container_width=True)
+except Exception as e:
+    st.error(f"❌ Error al mostrar la vista previa: {e}")
+    st.write("Mostrando estructura básica del DataFrame:")
+    st.write(df_final.info())
 
     # ==========================
     # 🤖 MODELO DE SCORE
