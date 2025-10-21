@@ -124,8 +124,8 @@ st.markdown("---")
 st.subheader("🧮 Cálculo de Probabilidad de Pago / Score de Recuperación")
 
 if st.button("Calcular probabilidad de pago para toda la base"):
-with st.spinner("Calculando, por favor espera..."):
-df_modelo = df_final.copy()
+    with st.spinner("Calculando, por favor espera..."):
+        df_modelo = df_final.copy()
 
 # Variables derivadas
 def safe_days_diff(fecha):
