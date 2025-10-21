@@ -138,6 +138,85 @@ def limpiar_texto(texto):
     # ------------------------------
     st.session_state["df_limpio"] = df
     st.success("✅ Base lista y guardada como `df_limpio` para el siguiente paso (análisis exploratorio o modelo).")
+    # ------------------------------
+    # PASO 3
+    # ------------------------------
+st.title("📊 Paso 3 — Análisis Exploratorio de Datos (EDA)")
+
+if "df_limpio" not in st.session_state:
+    st.warning("⚠️ Primero completa el Paso 2 (Limpieza y Transformación).")
+else:
+    df = st.session_state["df_limpio"]
+
+    # =========================
+    # 🔍 1️⃣ Resumen General
+    # =========================
+    st.subheader("📋 Información General del DataFrame")
+    st.write(f"Filas totales: **{df.shape[0]:,}**")
+    st.write(f"Columnas totales: **{df.shape[1]:,}**")
+
+    st.dataframe(df.describe(include="all").transpose())
+
+    # =========================
+    # ⚠️ 2️⃣ Valores Nulos
+    # =========================
+    st.subheader("🚨 Valores Nulos por Columna")
+    nulos = df.isnull().sum().sort_values(ascending=False)
+    st.bar_chart(nulos)
+
+    # =========================
+    # 📈 3️⃣ Distribución de Variables Numéricas
+    # =========================
+    st.subheader("📈 Distribución de Variables Numéricas")
+
+    columnas_numericas = df.select_dtypes(include=["int64", "float64"]).columns.tolist()
+
+    if columnas_numericas:
+        columna = st.selectbox("Selecciona una variable numérica para graficar:", columnas_numericas)
+        fig, ax = plt.subplots()
+        ax.hist(df[columna].dropna(), bins=30)
+        ax.set_title(f"Distribución de {columna}")
+        st.pyplot(fig)
+    else:
+        st.info("No se encontraron variables numéricas para graficar.")
+
+    # =========================
+    # 🔗 4️⃣ Correlaciones
+    # =========================
+    st.subheader("🔗 Correlaciones entre Variables Numéricas")
+
+    if len(columnas_numericas) >= 2:
+        corr = df[columnas_numericas].corr()
+        st.dataframe(corr)
+
+        fig, ax = plt.subplots()
+        cax = ax.matshow(corr, cmap="coolwarm")
+        fig.colorbar(cax)
+        ax.set_xticks(range(len(corr.columns)))
+        ax.set_yticks(range(len(corr.columns)))
+        ax.set_xticklabels(corr.columns, rotation=90)
+        ax.set_yticklabels(corr.columns)
+        st.pyplot(fig)
+    else:
+        st.info("No hay suficientes variables numéricas para calcular correlaciones.")
+
+    # =========================
+    # 🧠 5️⃣ Recomendación de Variables
+    # =========================
+    st.subheader("🧠 Variables candidatas para el modelo")
+    st.markdown("""
+    Basado en la correlación y la disponibilidad de datos:
+    - Variables con alta correlación entre sí pueden ser redundantes.
+    - Las variables con baja cantidad de nulos y variabilidad alta son mejores predictoras.
+    """)
+    st.dataframe(
+        pd.DataFrame({
+            "Columna": df.columns,
+            "% Nulos": (df.isnull().sum() / len(df) * 100).round(2),
+            "Tipo de Dato": df.dtypes.astype(str)
+        }).sort_values("% Nulos")
+    )
+
 
 
 
