@@ -23,37 +23,6 @@ except Exception:
     XGB_AVAILABLE = False
 
 # ==============================
-# 🎨 ESTILOS CORPORATIVOS
-# ==============================
-st.markdown("""
-<style>
-html, body, .stApp {
-    background-color: #FFFFFF;
-    color: #1B168C;
-    font-family: 'Helvetica Neue', sans-serif;
-}
-h1, h2, h3 {
-    color: #1B168C !important;
-    text-align: center;
-}
-.stButton>button {
-    background-color: #F43B63;
-    color: white;
-    border: none;
-    border-radius: 5px;
-    padding: 0.6em 1.2em;
-    font-weight: bold;
-}
-.stButton>button:hover {
-    background-color: #d83457;
-}
-</style>
-""", unsafe_allow_html=True)
-
-st.title("📊 COS SCORE 1.0 — Contacto, Negociación y Pago")
-st.markdown("Sube tu archivo **asig_consolidada.xlsx** para calcular las probabilidades y el Score final COS (0–100).")
-
-# ==============================
 # 📂 CARGA DEL EXCEL
 # ==============================
 uploaded = st.file_uploader("📂 Cargar archivo Excel", type=["xlsx"])
