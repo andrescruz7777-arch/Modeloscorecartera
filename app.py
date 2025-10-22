@@ -1,8 +1,9 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
+import matplotlib.pyplot as plt
 from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import OneHotEncoder
+from sklearn.preprocessing import OneHotEncoder, MinMaxScaler
 from sklearn.compose import ColumnTransformer
 from sklearn.pipeline import Pipeline
 from sklearn.impute import SimpleImputer
@@ -14,16 +15,14 @@ from io import BytesIO
 # ==============================
 # CONFIGURACIÓN GENERAL
 # ==============================
-st.set_page_config(page_title="COS SCORE 1.0", layout="wide")
+st.set_page_config(page_title="COS SCORE 1.1", layout="wide")
+st.title("📊 COS SCORE 1.1 — Recalibrado Automáticamente")
 
 try:
     from xgboost import XGBClassifier
     XGBoost = True
 except Exception:
     XGBoost = False
-
-st.title("COS SCORE 1.0 — Probabilidad de Contacto, Negociación y Pago")
-st.write("Sube el archivo **asig_consolidada.xlsx** para calcular las probabilidades y el Score final (0–100).")
 
 # ==============================
 # FUNCIONES AUXILIARES
@@ -40,13 +39,13 @@ def categorizar_capital(v):
         v = float(v)
     except:
         return np.nan
-    if v < 500_000:
+    if v < 2_000_000:
         return "R1"
-    elif v < 2_000_000:
-        return "R2"
-    elif v < 5_000_000:
-        return "R3"
     elif v < 10_000_000:
+        return "R2"
+    elif v < 15_000_000:
+        return "R3"
+    elif v < 20_000_000:
         return "R4"
     else:
         return "R5"
@@ -54,6 +53,9 @@ def categorizar_capital(v):
 def safe_cols(df, cols):
     return [c for c in cols if c in df.columns]
 
+# ==============================
+# ENTRENAMIENTO AJUSTADO
+# ==============================
 def train_binary_model(df, target_col, num_cols, cat_cols, model_kind):
     df = df[~df[target_col].isna()]
     if df.empty or df[target_col].nunique() < 2:
@@ -73,13 +75,17 @@ def train_binary_model(df, target_col, num_cols, cat_cols, model_kind):
     for c in num_avail:
         X[c] = pd.to_numeric(X[c], errors="coerce")
 
+    # Detectar desbalance
+    pos, neg = y.sum(), len(y) - y.sum()
+    ratio = neg / max(pos, 1)
+    st.write(f"⚖️ Balance {target_col}: {pos} positivos, {neg} negativos (ratio={ratio:.1f})")
+
     X_train, X_test, y_train, y_test = train_test_split(
         X, y, test_size=0.25, random_state=42, stratify=y
     )
 
     num_proc = Pipeline([("imputer", SimpleImputer(strategy="median"))])
 
-    # OneHotEncoder compatible con cualquier versión de sklearn
     try:
         onehot = OneHotEncoder(handle_unknown="ignore", sparse_output=False)
     except TypeError:
@@ -95,7 +101,7 @@ def train_binary_model(df, target_col, num_cols, cat_cols, model_kind):
         ("cat", cat_proc, cat_avail)
     ])
 
-    # Modelo según tipo
+    # Modelo con ajuste de balance
     if model_kind == "logit":
         model = LogisticRegression(max_iter=200, class_weight="balanced")
     elif model_kind == "rf":
@@ -109,7 +115,8 @@ def train_binary_model(df, target_col, num_cols, cat_cols, model_kind):
                 n_estimators=400, max_depth=5, learning_rate=0.08,
                 subsample=0.9, colsample_bytree=0.9, reg_lambda=1.0,
                 random_state=42, objective="binary:logistic",
-                eval_metric="auc", tree_method="hist"
+                eval_metric="auc", tree_method="hist",
+                scale_pos_weight=ratio  # <-- recalibra automáticamente
             )
         else:
             model = GradientBoostingClassifier(random_state=42)
@@ -134,24 +141,24 @@ def add_pred(df, pipe, num, cat, out):
         df[out] = pipe.predict_proba(df[safe_cols(df, num + cat)])[:, 1]
     except:
         df[out] = np.nan
+    # Escalar entre 0 y 1 (recalibrar probabilidades)
+    scaler = MinMaxScaler()
+    df[out] = scaler.fit_transform(df[[out]])
     return df
 
 # ==============================
-# CARGA DE ARCHIVO
+# INTERFAZ STREAMLIT
 # ==============================
-uploaded = st.file_uploader("📂 Cargar archivo Excel", type=["xlsx"])
+uploaded = st.file_uploader("📂 Cargar archivo Excel (asig_consolidada.xlsx)", type=["xlsx"])
 
 if uploaded:
     df = pd.read_excel(uploaded)
     df.columns = [str(c).strip() for c in df.columns]
-
-    st.info(f"Base cargada con {df.shape[0]} filas y {df.shape[1]} columnas.")
+    st.info(f"Base cargada: {df.shape[0]} filas y {df.shape[1]} columnas.")
 
     # Rango de capital
     if 'Capital Act' in df.columns:
         df['RANGO_CAPITAL'] = df['Capital Act'].apply(categorizar_capital)
-    else:
-        df['RANGO_CAPITAL'] = np.nan
 
     # Variables temporales
     if 'FECHA_ULTIMO_CONTACTO' in df:
@@ -161,13 +168,12 @@ if uploaded:
     if 'FECHA_DE_PROMESA' in df:
         df['DIAS_DESDE_PROMESA'] = days_since(df['FECHA_DE_PROMESA'])
 
-    # Targets binarios
     for t in ['TIENE_GESTION', 'TIENE_PROMESA', 'TIENE_PAGO']:
         if t in df.columns:
             df[t] = pd.to_numeric(df[t], errors='coerce').fillna(0).astype(int)
 
     # ==============================
-    # MODELOS
+    # VARIABLES POR MODELO
     # ==============================
     num_contact = ['Dias Mora Fin', 'Capital Act', 'CANTIDAD_GESTIONES', 'DIAS_DESDE_ULT_CONTACTO']
     cat_contact = ['Producto', 'RANGO_CAPITAL', 'ETAPA JURIDICA', 'MEJOR_CONTACTO', 'Usuario Final', 'CIUDAD']
@@ -179,41 +185,75 @@ if uploaded:
                 'DIAS_DESDE_ULT_PAGO', 'DIAS_DESDE_PROMESA']
     cat_pago = ['Producto', 'RANGO_CAPITAL', 'TIPO_PAGO', 'ETAPA JURIDICA']
 
-    with st.spinner("Entrenando modelos y calculando probabilidades..."):
+    with st.spinner("⚙️ Entrenando y recalibrando modelos..."):
+        aucs = {}
+        # CONTACTO
         if 'TIENE_GESTION' in df:
             m1, auc1, f1 = train_binary_model(df, 'TIENE_GESTION', num_contact, cat_contact, 'logit')
+            aucs['Contacto'] = auc1
             df = add_pred(df, m1, *f1, 'P_contacto')
+        # NEGOCIACION
         if 'TIENE_PROMESA' in df:
             num_neg2 = num_neg + (['P_contacto'] if 'P_contacto' in df else [])
             m2, auc2, f2 = train_binary_model(df, 'TIENE_PROMESA', num_neg2, cat_neg, 'rf')
+            aucs['Negociacion'] = auc2
             df = add_pred(df, m2, *f2, 'P_negociacion')
+        # PAGO
         if 'TIENE_PAGO' in df:
             num_pago2 = num_pago + (['P_negociacion'] if 'P_negociacion' in df else [])
             m3, auc3, f3 = train_binary_model(df, 'TIENE_PAGO', num_pago2, cat_pago, 'xgb')
+            aucs['Pago'] = auc3
             df = add_pred(df, m3, *f3, 'P_pago')
 
-        df['SCORE_FINAL'] = (0.3*df['P_contacto'].fillna(0) +
-                             0.3*df['P_negociacion'].fillna(0) +
-                             0.4*df['P_pago'].fillna(0)) * 100
+        # ==============================
+        # SCORE FINAL AJUSTADO
+        # ==============================
+        df['SCORE_FINAL'] = (
+            0.35 * df['P_contacto'].fillna(0) +
+            0.45 * df['P_negociacion'].fillna(0) +
+            0.20 * df['P_pago'].fillna(0)
+        ) * 100
+
         df['CATEGORIA'] = pd.cut(df['SCORE_FINAL'],
                                  bins=[-1, 49.9, 79.9, 100],
                                  labels=['BAJA', 'MEDIA', 'ALTA'])
-        st.success("✅ Modelo ejecutado correctamente.")
+
+        st.success("✅ Modelos recalibrados y Score calculado correctamente.")
 
     # ==============================
-    # RESULTADOS
+    # RESULTADOS Y ANÁLISIS
     # ==============================
+    st.subheader("📈 Resultados y métricas")
+
+    st.write("**AUC por submodelo (calidad predictiva):**")
+    for k, v in aucs.items():
+        st.write(f"- {k}: **{v:.3f}**" if v is not None else f"- {k}: sin datos suficientes")
+
+    st.write("**Rango de probabilidades:**")
+    for p in ['P_contacto', 'P_negociacion', 'P_pago']:
+        if p in df.columns:
+            st.write(f"{p}: min={df[p].min():.3f}, max={df[p].max():.3f}, mean={df[p].mean():.3f}")
+
     st.subheader("Vista previa de resultados")
     cols_show = ['Deudor','Producto','RANGO_CAPITAL','P_contacto','P_negociacion','P_pago','SCORE_FINAL','CATEGORIA']
     st.dataframe(df[safe_cols(df, cols_show)].head(15))
 
-    # Descargar Excel
+    # DISTRIBUCIÓN VISUAL
+    st.subheader("Distribución del SCORE_FINAL")
+    fig, ax = plt.subplots()
+    ax.hist(df["SCORE_FINAL"], bins=20, color="skyblue", edgecolor="gray")
+    ax.set_xlabel("SCORE_FINAL")
+    ax.set_ylabel("Frecuencia")
+    st.pyplot(fig)
+
+    # DESCARGA
     output = BytesIO()
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
         df.to_excel(writer, index=False, sheet_name='Scored')
     st.download_button(
-        "📥 Descargar resultados",
+        "📥 Descargar resultados recalibrados",
         data=output.getvalue(),
         file_name="asig_consolidada_scored.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
+
