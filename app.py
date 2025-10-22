@@ -1,257 +1,217 @@
 import streamlit as st
 import pandas as pd
-import matplotlib.pyplot as plt
-import unicodedata
-import io
-import base64
+import numpy as np
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import OneHotEncoder
+from sklearn.compose import ColumnTransformer
+from sklearn.pipeline import Pipeline
+from sklearn.impute import SimpleImputer
+from sklearn.linear_model import LogisticRegression
+from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
+from sklearn.metrics import roc_auc_score
+from io import BytesIO
 
-# ============================================
-# 🔒 CONTROL DE FLUJO ENTRE PASOS
-# ============================================
-if "df_unificado" not in st.session_state:
-    st.session_state["df_unificado"] = None
-if "df_limpio" not in st.session_state:
-    st.session_state["df_limpio"] = None
+# ==============================
+# 🧠 CONFIGURACIÓN GENERAL
+# ==============================
+st.set_page_config(page_title="COS SCORE 1.0 — Contacto, Negociación y Pago", layout="wide")
 
-# ============================================
-# 📂 PASO 1: CARGA DE DATOS
-# ============================================
-st.title("📈 Paso 1 — Carga y Exploración de Datos (Enero a Septiembre)")
+try:
+    from xgboost import XGBClassifier
+    XGB_AVAILABLE = True
+except Exception:
+    XGB_AVAILABLE = False
 
-file_ene_mar = st.file_uploader("📘 Cargar archivo Enero-Marzo", type=["xlsx"])
-file_abr_sep = st.file_uploader("📗 Cargar archivo Abril-Septiembre", type=["xlsx"])
+# ==============================
+# 🎨 ESTILOS CORPORATIVOS
+# ==============================
+st.markdown("""
+<style>
+html, body, .stApp {
+    background-color: #FFFFFF;
+    color: #1B168C;
+    font-family: 'Helvetica Neue', sans-serif;
+}
+h1, h2, h3 {
+    color: #1B168C !important;
+    text-align: center;
+}
+.stButton>button {
+    background-color: #F43B63;
+    color: white;
+    border: none;
+    border-radius: 5px;
+    padding: 0.6em 1.2em;
+    font-weight: bold;
+}
+.stButton>button:hover {
+    background-color: #d83457;
+}
+</style>
+""", unsafe_allow_html=True)
 
-if file_ene_mar and file_abr_sep:
-    df_ene_mar = pd.read_excel(file_ene_mar)
-    df_abr_sep = pd.read_excel(file_abr_sep)
-    df_unificado = pd.concat([df_ene_mar, df_abr_sep], ignore_index=True, sort=False)
-    st.session_state["df_unificado"] = df_unificado
-    st.success(f"✅ Bases unificadas correctamente ({len(df_unificado):,} registros)")
-    st.dataframe(df_unificado.head())
-else:
-    st.info("⬆️ Sube ambas bases para iniciar.")
+st.title("📊 COS SCORE 1.0 — Contacto, Negociación y Pago")
+st.markdown("Sube tu archivo **asig_consolidada.xlsx** para calcular las probabilidades y el Score final COS (0–100).")
 
-# ============================================
-# 🧩 PASO 2 — LIMPIEZA Y TRANSFORMACIÓN
-# ============================================
-st.title("🧩 Paso 2 — Limpieza y Transformación de Datos (Versión Final)")
+# ==============================
+# 📂 CARGA DEL EXCEL
+# ==============================
+uploaded = st.file_uploader("📂 Cargar archivo Excel", type=["xlsx"])
 
-if st.session_state["df_unificado"] is not None:
-    df = st.session_state["df_unificado"].copy()
+# ------------------------------
+# 🧩 FUNCIONES AUXILIARES
+# ------------------------------
+def to_datetime_safe(s):
+    return pd.to_datetime(s, errors='coerce')
 
-    # Estandarizar nombres
-    df.columns = (
-        df.columns.str.strip()
-        .str.lower()
-        .str.replace(" ", "_")
-        .str.replace("[^a-z0-9_]", "", regex=True)
+def days_since(series):
+    dt = to_datetime_safe(series)
+    return (pd.Timestamp.today().normalize() - dt).dt.days
+
+def categorizar_capital(v):
+    try:
+        v = float(v)
+    except:
+        return np.nan
+    if v < 500_000:
+        return "R1"
+    elif v < 2_000_000:
+        return "R2"
+    elif v < 5_000_000:
+        return "R3"
+    elif v < 10_000_000:
+        return "R4"
+    else:
+        return "R5"
+
+def safe_cols(df, cols):
+    return [c for c in cols if c in df.columns]
+
+def train_binary_model(df, target_col, num_cols, cat_cols, model_kind):
+    df = df[~df[target_col].isna()]
+    if df.empty or df[target_col].nunique() < 2:
+        return None, None, ([], [])
+
+    num_avail = safe_cols(df, num_cols)
+    cat_avail = safe_cols(df, cat_cols)
+    if len(num_avail) + len(cat_avail) == 0:
+        return None, None, ([], [])
+
+    X = df[num_avail + cat_avail]
+    y = df[target_col].astype(int)
+
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.25, random_state=42, stratify=y)
+
+    num_proc = Pipeline([("imputer", SimpleImputer(strategy="median"))])
+    cat_proc = Pipeline([
+        ("imputer", SimpleImputer(strategy="most_frequent")),
+        ("onehot", OneHotEncoder(handle_unknown="ignore", sparse=False))
+    ])
+    prep = ColumnTransformer([("num", num_proc, num_avail), ("cat", cat_proc, cat_avail)])
+
+    if model_kind == "logit":
+        model = LogisticRegression(max_iter=200, class_weight="balanced")
+    elif model_kind == "rf":
+        model = RandomForestClassifier(
+            n_estimators=300, min_samples_leaf=2, random_state=42,
+            n_jobs=-1, class_weight="balanced_subsample"
+        )
+    elif model_kind == "xgb":
+        model = XGBClassifier(
+            n_estimators=400, max_depth=5, learning_rate=0.08,
+            subsample=0.9, colsample_bytree=0.9, reg_lambda=1.0,
+            random_state=42, objective="binary:logistic", eval_metric="auc",
+            tree_method="hist"
+        ) if XGBoost else GradientBoostingClassifier(random_state=42)
+    else:
+        model = GradientBoostingClassifier(random_state=42)
+
+    clf = Pipeline([("prep", prep), ("model", model)])
+    clf.fit(X_train, y_train)
+    try:
+        auc = roc_auc_score(y_test, clf.predict_proba(X_test)[:, 1])
+    except:
+        auc = None
+    return clf, auc, (num_avail, cat_avail)
+
+def add_pred(df, pipe, num, cat, out):
+    if pipe is None:
+        df[out] = np.nan
+        return df
+    try:
+        df[out] = pipe.predict_proba(df[safe_cols(df, num + cat)])[:, 1]
+    except:
+        df[out] = np.nan
+    return df
+
+# ==============================
+# 🧠 EJECUCIÓN DEL MODELO
+# ==============================
+if uploaded:
+    df = pd.read_excel(uploaded)
+    df.columns = [str(c).strip() for c in df.columns]
+
+    st.info(f"Base cargada con {df.shape[0]} filas y {df.shape[1]} columnas.")
+
+    df['RANGO_CAPITAL'] = df.get('Capital Act', np.nan).apply(categorizar_capital)
+    if 'FECHA_ULTIMO_CONTACTO' in df:
+        df['DIAS_DESDE_ULT_CONTACTO'] = days_since(df['FECHA_ULTIMO_CONTACTO'])
+    if 'FECHA_ULTIMO_PAGO' in df:
+        df['DIAS_DESDE_ULT_PAGO'] = days_since(df['FECHA_ULTIMO_PAGO'])
+    if 'FECHA_DE_PROMESA' in df:
+        df['DIAS_DESDE_PROMESA'] = days_since(df['FECHA_DE_PROMESA'])
+
+    for t in ['TIENE_GESTION', 'TIENE_PROMESA', 'TIENE_PAGO']:
+        if t in df.columns:
+            df[t] = pd.to_numeric(df[t], errors='coerce').fillna(0).astype(int)
+
+    # -----------------
+    # Modelos
+    # -----------------
+    num_contact = ['Dias Mora Fin', 'Capital Act', 'CANTIDAD_GESTIONES', 'DIAS_DESDE_ULT_CONTACTO']
+    cat_contact = ['Producto', 'RANGO_CAPITAL', 'ETAPA JURIDICA', 'MEJOR_CONTACTO', 'Usuario Final', 'CIUDAD']
+
+    num_neg = ['Dias Mora Fin', 'Capital Act', 'CANTIDAD_DE_PROMESAS', 'CANTIDAD_GESTIONES']
+    cat_neg = ['Producto', 'RANGO_CAPITAL', 'MEJOR_GESTION', 'TIPO_DE_ACUERDO', 'Usuario Final', 'ETAPA JURIDICA']
+
+    num_pago = ['Dias Mora Fin', 'Capital Act', 'VALOR NEGOCIADO', 'CANTIDAD_PAGOS', 'SUMA_DE_PAGOS',
+                'DIAS_DESDE_ULT_PAGO', 'DIAS_DESDE_PROMESA']
+    cat_pago = ['Producto', 'RANGO_CAPITAL', 'TIPO_PAGO', 'ETAPA JURIDICA']
+
+    with st.spinner("Entrenando modelos..."):
+        if 'TIENE_GESTION' in df:
+            m1, auc1, f1 = train_binary_model(df, 'TIENE_GESTION', num_contact, cat_contact, 'logit')
+            df = add_pred(df, m1, *f1, 'P_contacto')
+        if 'TIENE_PROMESA' in df:
+            num_neg2 = num_neg + (['P_contacto'] if 'P_contacto' in df else [])
+            m2, auc2, f2 = train_binary_model(df, 'TIENE_PROMESA', num_neg2, cat_neg, 'rf')
+            df = add_pred(df, m2, *f2, 'P_negociacion')
+        if 'TIENE_PAGO' in df:
+            num_pago2 = num_pago + (['P_negociacion'] if 'P_negociacion' in df else [])
+            m3, auc3, f3 = train_binary_model(df, 'TIENE_PAGO', num_pago2, cat_pago, 'xgb')
+            df = add_pred(df, m3, *f3, 'P_pago')
+
+        df['SCORE_FINAL'] = (0.3*df['P_contacto'].fillna(0) +
+                             0.3*df['P_negociacion'].fillna(0) +
+                             0.4*df['P_pago'].fillna(0)) * 100
+        df['CATEGORIA'] = pd.cut(df['SCORE_FINAL'],
+                                 bins=[-1, 49.9, 79.9, 100],
+                                 labels=['BAJA', 'MEDIA', 'ALTA'])
+        st.success("✅ Modelo ejecutado correctamente.")
+
+    # ==============================
+    # 📈 RESULTADOS
+    # ==============================
+    st.subheader("📊 Vista previa de resultados")
+    st.dataframe(df[['Deudor','Producto','RANGO_CAPITAL','P_contacto','P_negociacion','P_pago','SCORE_FINAL','CATEGORIA']].head(15))
+
+    # Descargar Excel
+    output = BytesIO()
+    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+        df.to_excel(writer, index=False, sheet_name='Scored')
+    st.download_button(
+        "📥 Descargar resultados COS SCORE",
+        data=output.getvalue(),
+        file_name="asig_consolidada_scored.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
-
-    # Eliminar columna innecesaria
-    if "sand" in df.columns:
-        df = df.drop(columns=["sand"])
-
-    # Limpiar texto
-    def limpiar_texto(texto):
-        if pd.isna(texto):
-            return texto
-        try:
-            texto = str(texto).encode("utf-8", "ignore").decode("utf-8", "ignore")
-            texto = (
-                texto.replace("√ë", "Ñ")
-                .replace("√±", "ñ")
-                .replace("√©", "é")
-                .replace("√¡", "á")
-                .replace("√³", "ó")
-                .replace("√º", "ú")
-            )
-            return unicodedata.normalize("NFKD", texto).strip()
-        except Exception:
-            return str(texto)
-
-    for c in df.select_dtypes(include="object").columns:
-        df[c] = df[c].apply(limpiar_texto)
-
-    st.session_state["df_limpio"] = df
-    st.success("✅ Base jurídica limpia y lista.")
-else:
-    st.warning("⚠️ Primero completa el Paso 1.")
-
-# ============================================
-# 💰 PASO 3 — CRUCE CON PAGOS
-# ============================================
-st.title("💰 Paso 3 — Cruce de Base Jurídica con Pagos")
-
-file_pagos = st.file_uploader("📘 Cargar base de pagos (pagos_sudameris.xlsx)", type=["xlsx"])
-
-if "df_limpio" not in st.session_state:
-    st.warning("⚠️ Primero completa los pasos anteriores (base jurídica limpia).")
-elif file_pagos:
-    df_pagos = pd.read_excel(file_pagos)
-    df_pagos.columns = (
-        df_pagos.columns.str.strip()
-        .str.lower()
-        .str.replace(" ", "_")
-        .str.replace("[^a-z0-9_]", "", regex=True)
-    )
-
-    # Renombrar columnas principales
-    df_pagos = df_pagos.rename(columns={
-        "total_de_pago": "valor_pago",
-        "fecha_pago": "fecha_pago",
-        "documento": "documento"
-    })
-
-    # Convertir tipos
-    if "valor_pago" in df_pagos.columns:
-        df_pagos["valor_pago"] = pd.to_numeric(df_pagos["valor_pago"], errors="coerce")
-    if "fecha_pago" in df_pagos.columns:
-        df_pagos["fecha_pago"] = pd.to_datetime(df_pagos["fecha_pago"], errors="coerce")
-
-    # Agrupar pagos
-    resumen_pagos = (
-        df_pagos.groupby("documento", dropna=False)
-        .agg({
-            "valor_pago": ["sum", "count"],
-            "fecha_pago": "max"
-        })
-    )
-    resumen_pagos.columns = ["total_pagado", "cantidad_pagos", "fecha_ultimo_pago"]
-    resumen_pagos = resumen_pagos.reset_index()
-    resumen_pagos["tiene_pago"] = (resumen_pagos["cantidad_pagos"] > 0).astype(int)
-
-    df_jur = st.session_state["df_limpio"].copy()
-    df_jur["deudor"] = df_jur["deudor"].astype(str)
-    resumen_pagos["documento"] = resumen_pagos["documento"].astype(str)
-
-    df_cruce = df_jur.merge(
-        resumen_pagos,
-        how="left",
-        left_on="deudor",
-        right_on="documento"
-    )
-
-    for col in ["tiene_pago", "total_pagado", "cantidad_pagos"]:
-        if col in df_cruce.columns:
-            df_cruce[col] = df_cruce[col].fillna(0)
-            if col == "tiene_pago":
-                df_cruce[col] = df_cruce[col].astype(int)
-
-    st.session_state["df_cruce_pagos"] = df_cruce
-    st.success("✅ Cruce realizado correctamente.")
-else:
-    st.info("⬆️ Carga la base de pagos para continuar.")
-
-# ============================================
-# 🤝 PASO 4 — CRUCE CON PROMESAS
-# ============================================
-st.title("🤝 Paso 4 — Cruce con Promesas de Pago")
-
-file_promesas = st.file_uploader("📗 Cargar base de promesas (promesas_sudameris.xlsx)", type=["xlsx"])
-
-if "df_cruce_pagos" not in st.session_state:
-    st.warning("⚠️ Primero completa los pasos anteriores.")
-elif file_promesas:
-    df_prom = pd.read_excel(file_promesas)
-    df_prom.columns = (
-        df_prom.columns.str.strip()
-        .str.lower()
-        .str.replace(" ", "_")
-        .str.replace("[^a-z0-9_]", "", regex=True)
-    )
-
-    col_doc = next((c for c in df_prom.columns if "identific" in c or "document" in c), None)
-    df_prom = df_prom.rename(columns={col_doc: "documento"})
-
-    df_prom = df_prom.rename(columns={
-        "valor_acuerdo": "valor_prometido",
-        "valor_cuota_prometida": "valor_cuota_prometida",
-        "fecha_de_pago_prometida": "fecha_promesa",
-        "estado_final": "estado_promesa"
-    })
-
-    df_prom["valor_prometido"] = pd.to_numeric(df_prom.get("valor_prometido", 0), errors="coerce").fillna(0)
-    df_prom["valor_cuota_prometida"] = pd.to_numeric(df_prom.get("valor_cuota_prometida", 0), errors="coerce").fillna(0)
-    df_prom["fecha_promesa"] = pd.to_datetime(df_prom.get("fecha_promesa"), errors="coerce")
-
-    cantidad_promesas = df_prom.groupby("documento").size().reset_index(name="cantidad_promesas")
-    ultima_promesa = (
-        df_prom.sort_values("fecha_promesa")
-        .groupby("documento", as_index=False)
-        .tail(1)
-        [["documento", "fecha_promesa", "valor_cuota_prometida", "estado_promesa", "recurso"]]
-    )
-
-    resumen_promesas = ultima_promesa.merge(cantidad_promesas, on="documento", how="left")
-    resumen_promesas = resumen_promesas.rename(columns={
-        "valor_cuota_prometida": "valor_ultima_promesa",
-        "fecha_promesa": "fecha_ultima_promesa",
-        "estado_promesa": "estado_ultima_promesa"
-    })
-    resumen_promesas["tiene_promesa"] = (resumen_promesas["cantidad_promesas"] > 0).astype(int)
-
-    df_base = st.session_state["df_cruce_pagos"].copy()
-    df_cruce_promesas = df_base.merge(
-        resumen_promesas,
-        how="left",
-        left_on="deudor",
-        right_on="documento"
-    )
-
-    for col in ["tiene_promesa", "valor_ultima_promesa", "cantidad_promesas"]:
-        df_cruce_promesas[col] = df_cruce_promesas[col].fillna(0)
-
-    st.session_state["df_cruce_promesas"] = df_cruce_promesas
-    st.success("✅ Cruce con promesas realizado correctamente.")
-else:
-    st.info("⬆️ Carga la base de promesas.")
-
-# ============================================
-# 📞 PASO 5 — GESTIONES Y DESCARGA FINAL
-# ============================================
-st.title("📞 Paso 5 — Cruce de Gestiones y Consolidado Final")
-
-file_gestion = st.file_uploader("📘 Cargar base de gestiones (gestion_sudameris.xlsx)", type=["xlsx"])
-
-if file_gestion and "df_cruce_promesas" in st.session_state:
-    df_gest = pd.read_excel(file_gestion)
-    df = st.session_state["df_cruce_promesas"].copy()
-
-    df_gest.columns = df_gest.columns.str.strip().str.lower()
-    col_id = next((c for c in df_gest.columns if "identific" in c), None)
-    col_mejor = next((c for c in df_gest.columns if "mejor" in c), None)
-
-    jerarquia = {
-        "1. gestion efectiva soluciona mora": 1,
-        "2. gestion efectiva sin pago": 2,
-        "3. no efectiva mensaje con tercero": 3,
-        "4. no efectiva mensaje maquina": 4,
-        "5. no efectiva contacto con tercero": 5,
-        "6. no efectiva": 6,
-        "7. operativo": 7
-    }
-    df_gest["nivel_efectividad"] = df_gest[col_mejor].astype(str).str.lower().map(jerarquia)
-    df_mejor = df_gest.sort_values("nivel_efectividad").groupby(col_id, as_index=False).first()
-    df_cant = df_gest.groupby(col_id, as_index=False).size().rename(columns={"size": "cantidad_gestiones"})
-
-    df_gest_final = pd.merge(df_mejor, df_cant, on=col_id, how="left")
-    df_gest_final["tiene_gestion_efectiva"] = df_gest_final["nivel_efectividad"].apply(lambda x: 1 if x in [1, 2] else 0)
-    df_gest_final = df_gest_final.rename(columns={col_id: "deudor"})
-
-    df_final = pd.merge(df, df_gest_final, on="deudor", how="left")
-    df_final["cantidad_gestiones"] = df_final["cantidad_gestiones"].fillna(0).astype(int)
-    df_final["tiene_gestion_efectiva"] = df_final["tiene_gestion_efectiva"].fillna(0).astype(int)
-
-    st.success("✅ Base final consolidada con pagos, promesas y gestiones.")
-    st.dataframe(df_final.head(10), use_container_width=True)
-
-    # 👉 Descargar base final consolidada
-    buffer = io.BytesIO()
-    with pd.ExcelWriter(buffer, engine="xlsxwriter") as writer:
-        df_final.to_excel(writer, index=False, sheet_name="Base Consolidada Final")
-    buffer.seek(0)
-    b64 = base64.b64encode(buffer.read()).decode()
-    href = f'<a href="data:application/octet-stream;base64,{b64}" download="Base_Consolidada_Final.xlsx">📥 Descargar Base Consolidada Final</a>'
-    st.markdown(href, unsafe_allow_html=True)
-else:
-    st.info("⬆️ Carga la base de gestiones después de los pasos previos.")
