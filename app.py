@@ -12,24 +12,22 @@ from sklearn.metrics import roc_auc_score
 from io import BytesIO
 
 # ==============================
-# 🧠 CONFIGURACIÓN GENERAL
+# CONFIGURACIÓN GENERAL
 # ==============================
-st.set_page_config(page_title="COS SCORE 1.0 — Contacto, Negociación y Pago", layout="wide")
+st.set_page_config(page_title="COS SCORE 1.0", layout="wide")
 
 try:
     from xgboost import XGBClassifier
-    XGB_AVAILABLE = True
+    XGBoost = True
 except Exception:
-    XGB_AVAILABLE = False
+    XGBoost = False
+
+st.title("COS SCORE 1.0 — Probabilidad de Contacto, Negociación y Pago")
+st.write("Sube el archivo **asig_consolidada.xlsx** para calcular las probabilidades y el Score final (0–100).")
 
 # ==============================
-# 📂 CARGA DEL EXCEL
+# FUNCIONES AUXILIARES
 # ==============================
-uploaded = st.file_uploader("📂 Cargar archivo Excel", type=["xlsx"])
-
-# ------------------------------
-# 🧩 FUNCIONES AUXILIARES
-# ------------------------------
 def to_datetime_safe(s):
     return pd.to_datetime(s, errors='coerce')
 
@@ -61,46 +59,71 @@ def train_binary_model(df, target_col, num_cols, cat_cols, model_kind):
     if df.empty or df[target_col].nunique() < 2:
         return None, None, ([], [])
 
-    num_avail = safe_cols(df, num_cols)
-    cat_avail = safe_cols(df, cat_cols)
+    num_avail = [c for c in num_cols if c in df.columns]
+    cat_avail = [c for c in cat_cols if c in df.columns]
     if len(num_avail) + len(cat_avail) == 0:
         return None, None, ([], [])
 
-    X = df[num_avail + cat_avail]
+    X = df[num_avail + cat_avail].copy()
     y = df[target_col].astype(int)
 
-    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.25, random_state=42, stratify=y)
+    # Convertir tipos
+    for c in cat_avail:
+        X[c] = X[c].astype(str).fillna("DESCONOCIDO")
+    for c in num_avail:
+        X[c] = pd.to_numeric(X[c], errors="coerce")
+
+    X_train, X_test, y_train, y_test = train_test_split(
+        X, y, test_size=0.25, random_state=42, stratify=y
+    )
 
     num_proc = Pipeline([("imputer", SimpleImputer(strategy="median"))])
+
+    # OneHotEncoder compatible con cualquier versión de sklearn
+    try:
+        onehot = OneHotEncoder(handle_unknown="ignore", sparse_output=False)
+    except TypeError:
+        onehot = OneHotEncoder(handle_unknown="ignore", sparse=False)
+
     cat_proc = Pipeline([
         ("imputer", SimpleImputer(strategy="most_frequent")),
-        ("onehot", OneHotEncoder(handle_unknown="ignore", sparse=False))
+        ("onehot", onehot)
     ])
-    prep = ColumnTransformer([("num", num_proc, num_avail), ("cat", cat_proc, cat_avail)])
 
+    prep = ColumnTransformer([
+        ("num", num_proc, num_avail),
+        ("cat", cat_proc, cat_avail)
+    ])
+
+    # Modelo según tipo
     if model_kind == "logit":
         model = LogisticRegression(max_iter=200, class_weight="balanced")
     elif model_kind == "rf":
         model = RandomForestClassifier(
-            n_estimators=300, min_samples_leaf=2, random_state=42,
-            n_jobs=-1, class_weight="balanced_subsample"
+            n_estimators=300, random_state=42,
+            class_weight="balanced_subsample", n_jobs=-1
         )
     elif model_kind == "xgb":
-        model = XGBClassifier(
-            n_estimators=400, max_depth=5, learning_rate=0.08,
-            subsample=0.9, colsample_bytree=0.9, reg_lambda=1.0,
-            random_state=42, objective="binary:logistic", eval_metric="auc",
-            tree_method="hist"
-        ) if XGBoost else GradientBoostingClassifier(random_state=42)
+        if XGBoost:
+            model = XGBClassifier(
+                n_estimators=400, max_depth=5, learning_rate=0.08,
+                subsample=0.9, colsample_bytree=0.9, reg_lambda=1.0,
+                random_state=42, objective="binary:logistic",
+                eval_metric="auc", tree_method="hist"
+            )
+        else:
+            model = GradientBoostingClassifier(random_state=42)
     else:
         model = GradientBoostingClassifier(random_state=42)
 
     clf = Pipeline([("prep", prep), ("model", model)])
     clf.fit(X_train, y_train)
+
     try:
         auc = roc_auc_score(y_test, clf.predict_proba(X_test)[:, 1])
-    except:
+    except Exception:
         auc = None
+
     return clf, auc, (num_avail, cat_avail)
 
 def add_pred(df, pipe, num, cat, out):
@@ -114,15 +137,23 @@ def add_pred(df, pipe, num, cat, out):
     return df
 
 # ==============================
-# 🧠 EJECUCIÓN DEL MODELO
+# CARGA DE ARCHIVO
 # ==============================
+uploaded = st.file_uploader("📂 Cargar archivo Excel", type=["xlsx"])
+
 if uploaded:
     df = pd.read_excel(uploaded)
     df.columns = [str(c).strip() for c in df.columns]
 
     st.info(f"Base cargada con {df.shape[0]} filas y {df.shape[1]} columnas.")
 
-    df['RANGO_CAPITAL'] = df.get('Capital Act', np.nan).apply(categorizar_capital)
+    # Rango de capital
+    if 'Capital Act' in df.columns:
+        df['RANGO_CAPITAL'] = df['Capital Act'].apply(categorizar_capital)
+    else:
+        df['RANGO_CAPITAL'] = np.nan
+
+    # Variables temporales
     if 'FECHA_ULTIMO_CONTACTO' in df:
         df['DIAS_DESDE_ULT_CONTACTO'] = days_since(df['FECHA_ULTIMO_CONTACTO'])
     if 'FECHA_ULTIMO_PAGO' in df:
@@ -130,13 +161,14 @@ if uploaded:
     if 'FECHA_DE_PROMESA' in df:
         df['DIAS_DESDE_PROMESA'] = days_since(df['FECHA_DE_PROMESA'])
 
+    # Targets binarios
     for t in ['TIENE_GESTION', 'TIENE_PROMESA', 'TIENE_PAGO']:
         if t in df.columns:
             df[t] = pd.to_numeric(df[t], errors='coerce').fillna(0).astype(int)
 
-    # -----------------
-    # Modelos
-    # -----------------
+    # ==============================
+    # MODELOS
+    # ==============================
     num_contact = ['Dias Mora Fin', 'Capital Act', 'CANTIDAD_GESTIONES', 'DIAS_DESDE_ULT_CONTACTO']
     cat_contact = ['Producto', 'RANGO_CAPITAL', 'ETAPA JURIDICA', 'MEJOR_CONTACTO', 'Usuario Final', 'CIUDAD']
 
@@ -147,7 +179,7 @@ if uploaded:
                 'DIAS_DESDE_ULT_PAGO', 'DIAS_DESDE_PROMESA']
     cat_pago = ['Producto', 'RANGO_CAPITAL', 'TIPO_PAGO', 'ETAPA JURIDICA']
 
-    with st.spinner("Entrenando modelos..."):
+    with st.spinner("Entrenando modelos y calculando probabilidades..."):
         if 'TIENE_GESTION' in df:
             m1, auc1, f1 = train_binary_model(df, 'TIENE_GESTION', num_contact, cat_contact, 'logit')
             df = add_pred(df, m1, *f1, 'P_contacto')
@@ -169,17 +201,18 @@ if uploaded:
         st.success("✅ Modelo ejecutado correctamente.")
 
     # ==============================
-    # 📈 RESULTADOS
+    # RESULTADOS
     # ==============================
-    st.subheader("📊 Vista previa de resultados")
-    st.dataframe(df[['Deudor','Producto','RANGO_CAPITAL','P_contacto','P_negociacion','P_pago','SCORE_FINAL','CATEGORIA']].head(15))
+    st.subheader("Vista previa de resultados")
+    cols_show = ['Deudor','Producto','RANGO_CAPITAL','P_contacto','P_negociacion','P_pago','SCORE_FINAL','CATEGORIA']
+    st.dataframe(df[safe_cols(df, cols_show)].head(15))
 
     # Descargar Excel
     output = BytesIO()
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
         df.to_excel(writer, index=False, sheet_name='Scored')
     st.download_button(
-        "📥 Descargar resultados COS SCORE",
+        "📥 Descargar resultados",
         data=output.getvalue(),
         file_name="asig_consolidada_scored.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
