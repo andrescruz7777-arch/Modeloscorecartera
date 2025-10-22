@@ -15,13 +15,14 @@ from io import BytesIO
 # ==============================
 # CONFIGURACIÓN
 # ==============================
-st.set_page_config(page_title="COS SCORE 1.2 — Mejorado en Pago", layout="wide")
+st.set_page_config(page_title="COS SCORE 1.3 — Recalibrado Final", layout="wide")
 
 try:
     from xgboost import XGBClassifier
     XGBoost = True
 except Exception:
     XGBoost = False
+
 
 # ==============================
 # FUNCIONES AUXILIARES
@@ -52,8 +53,9 @@ def categorizar_capital(v):
 def safe_cols(df, cols):
     return [c for c in cols if c in df.columns]
 
+
 # ==============================
-# ENTRENAMIENTO AUTOMÁTICO
+# FUNCIÓN GENERAL DE MODELO BINARIO
 # ==============================
 def train_binary_model(df, target_col, num_cols, cat_cols, model_kind):
     df = df[~df[target_col].isna()]
@@ -73,7 +75,6 @@ def train_binary_model(df, target_col, num_cols, cat_cols, model_kind):
     for c in num_avail:
         X[c] = pd.to_numeric(X[c], errors="coerce")
 
-    # Desbalance
     pos, neg = y.sum(), len(y) - y.sum()
     ratio = neg / max(pos, 1)
 
@@ -95,7 +96,6 @@ def train_binary_model(df, target_col, num_cols, cat_cols, model_kind):
         ("cat", cat_proc, cat_avail)
     ])
 
-    # Modelos
     if model_kind == "logit":
         model = LogisticRegression(max_iter=300, class_weight="balanced")
     elif model_kind == "rf":
@@ -116,6 +116,7 @@ def train_binary_model(df, target_col, num_cols, cat_cols, model_kind):
 
     clf = Pipeline([("prep", prep), ("model", model)])
     clf.fit(X_train, y_train)
+
     try:
         auc = roc_auc_score(y_test, clf.predict_proba(X_test)[:, 1])
     except Exception:
@@ -133,10 +134,11 @@ def add_pred(df, pipe, num, cat, out):
         df[out] = np.nan
     return df
 
+
 # ==============================
-# INTERFAZ
+# INTERFAZ PRINCIPAL STREAMLIT
 # ==============================
-tab1, tab2 = st.tabs(["🧠 Modelo COS SCORE 1.2", "📊 Análisis de Resultados"])
+tab1, tab2 = st.tabs(["🧠 Modelo COS SCORE 1.3", "📊 Análisis de Resultados"])
 
 with tab1:
     uploaded = st.file_uploader("📂 Cargar archivo Excel", type=["xlsx"])
@@ -145,35 +147,56 @@ with tab1:
         df.columns = [str(c).strip() for c in df.columns]
         st.info(f"Base cargada con {df.shape[0]} filas y {df.shape[1]} columnas.")
 
+        # Derivar variables
         if 'Capital Act' in df.columns:
             df['RANGO_CAPITAL'] = df['Capital Act'].apply(categorizar_capital)
-        if 'FECHA_ULTIMO_CONTACTO' in df:
+        if 'FECHA_ULTIMO_CONTACTO' in df.columns:
             df['DIAS_DESDE_ULT_CONTACTO'] = days_since(df['FECHA_ULTIMO_CONTACTO'])
-        if 'FECHA_ULTIMO_PAGO' in df:
+        if 'FECHA_ULTIMO_PAGO' in df.columns:
             df['DIAS_DESDE_ULT_PAGO'] = days_since(df['FECHA_ULTIMO_PAGO'])
-        if 'FECHA_DE_PROMESA' in df:
+        if 'FECHA_DE_PROMESA' in df.columns:
             df['DIAS_DESDE_PROMESA'] = days_since(df['FECHA_DE_PROMESA'])
-        for t in ['TIENE_GESTION','TIENE_PROMESA','TIENE_PAGO']:
+
+        for t in ['TIENE_GESTION', 'TIENE_PROMESA', 'TIENE_PAGO']:
             if t in df.columns:
                 df[t] = pd.to_numeric(df[t], errors='coerce').fillna(0).astype(int)
 
+        # Variables por submodelo
         num_contact = ['Dias Mora Fin','Capital Act','CANTIDAD_GESTIONES','DIAS_DESDE_ULT_CONTACTO']
         cat_contact = ['Producto','RANGO_CAPITAL','ETAPA JURIDICA','MEJOR_CONTACTO','Usuario Final','CIUDAD']
+
         num_neg = ['Dias Mora Fin','Capital Act','CANTIDAD_DE_PROMESAS','CANTIDAD_GESTIONES']
         cat_neg = ['Producto','RANGO_CAPITAL','MEJOR_GESTION','TIPO_DE_ACUERDO','Usuario Final','ETAPA JURIDICA']
 
-        # 🚀 Nuevo set ampliado para el modelo de pago
-        num_pago = [
-            'Dias Mora Fin','Capital Act','VALOR NEGOCIADO','CANTIDAD_PAGOS','SUMA_DE_PAGOS',
-            'DIAS_DESDE_ULT_PAGO','DIAS_DESDE_PROMESA',
-            'CANTIDAD_PROMESAS_CUMPLIDAS','PORCENTAJE_PROMESAS_CUMPLIDAS',
-            'PROMEDIO_VALOR_PAGO','PORCENTAJE_ABONO_CAPITAL','CANTIDAD_GESTIONES_ULT30'
-        ]
-        cat_pago = [
-            'Producto','RANGO_CAPITAL','TIPO_PAGO','ETAPA JURIDICA','GESTOR_ASIGNADO_FIJO'
-        ]
+        # =========================
+        # 🧮 BLOQUE FINAL DE P_PAGO
+        # =========================
+        if 'FECHA_ULTIMO_PAGO' in df.columns:
+            df['DIAS_DESDE_ULT_PAGO'] = (pd.Timestamp.today().normalize() -
+                                         pd.to_datetime(df['FECHA_ULTIMO_PAGO'], errors='coerce')).dt.days
+        else:
+            df['DIAS_DESDE_ULT_PAGO'] = np.nan
 
-        with st.spinner("Entrenando modelos recalibrados..."):
+        if all(col in df.columns for col in ['SUMA_DE_PAGOS', 'Capital Act']):
+            df['PORCENTAJE_ABONO_CAPITAL'] = pd.to_numeric(df['SUMA_DE_PAGOS'], errors='coerce') / \
+                                             pd.to_numeric(df['Capital Act'], errors='coerce')
+            df['PORCENTAJE_ABONO_CAPITAL'] = df['PORCENTAJE_ABONO_CAPITAL'].clip(0, 2)
+        else:
+            df['PORCENTAJE_ABONO_CAPITAL'] = np.nan
+
+        num_pago = [
+            'Dias Mora Fin',
+            'Capital Act',
+            'TOTAL_PAGOS',
+            'SUMA_DE_PAGOS',
+            'DIAS_DESDE_ULT_PAGO',
+            'PORCENTAJE_ABONO_CAPITAL',
+            'P_negociacion'
+        ]
+        cat_pago = ['Producto','RANGO_CAPITAL','ETAPA JURIDICA','SUB-ETAPA JURIDICA','Estado cuenta']
+
+        # Entrenamiento de modelos
+        with st.spinner("Entrenando modelos..."):
             aucs = {}
             if 'TIENE_GESTION' in df:
                 m1, auc1, f1 = train_binary_model(df,'TIENE_GESTION',num_contact,cat_contact,'logit')
@@ -183,16 +206,18 @@ with tab1:
                 m2, auc2, f2 = train_binary_model(df,'TIENE_PROMESA',num_neg2,cat_neg,'rf')
                 aucs['Negociacion']=auc2; df=add_pred(df,m2,*f2,'P_negociacion')
             if 'TIENE_PAGO' in df:
-                num_pago2=[c for c in num_pago if c in df.columns]+(['P_negociacion'] if 'P_negociacion' in df else [])
+                num_pago2=[c for c in num_pago if c in df.columns]
                 m3, auc3, f3 = train_binary_model(df,'TIENE_PAGO',num_pago2,cat_pago,'xgb')
                 aucs['Pago']=auc3; df=add_pred(df,m3,*f3,'P_pago')
 
+            # SCORE FINAL
             df['SCORE_FINAL']=(0.35*df['P_contacto'].fillna(0)+
                                0.45*df['P_negociacion'].fillna(0)+
                                0.20*df['P_pago'].fillna(0))*100
             df['CATEGORIA']=pd.cut(df['SCORE_FINAL'],[-1,49.9,79.9,100],labels=['BAJA','MEDIA','ALTA'])
-            st.success("✅ COS SCORE 1.2 ejecutado correctamente.")
+            st.success("✅ COS SCORE 1.3 ejecutado correctamente.")
 
+        # Vista previa
         st.subheader("Vista previa de resultados")
         cols_show=['Deudor','Producto','RANGO_CAPITAL','P_contacto','P_negociacion','P_pago','SCORE_FINAL','CATEGORIA']
         st.dataframe(df[safe_cols(df,cols_show)].head(15))
@@ -204,10 +229,11 @@ with tab1:
         out=BytesIO()
         with pd.ExcelWriter(out,engine='openpyxl') as w:
             df.to_excel(w,index=False,sheet_name='Scored')
-        st.download_button("📥 Descargar resultados COS SCORE 1.2",data=out.getvalue(),
-            file_name="asig_consolidada_score_1_2.xlsx",
+        st.download_button("📥 Descargar resultados COS SCORE 1.3",data=out.getvalue(),
+            file_name="asig_consolidada_score_1_3.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
         st.session_state["df_resultado"]=df
+
 
 with tab2:
     if "df_resultado" not in st.session_state:
@@ -228,3 +254,4 @@ with tab2:
             st.subheader("Comparación SCORE vs TIENE_PAGO")
             comp=df.groupby("TIENE_PAGO")["SCORE_FINAL"].mean().rename({0:"Sin pago",1:"Con pago"})
             st.bar_chart(comp)
+
